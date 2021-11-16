@@ -1,0 +1,32 @@
+version: "3.7"
+
+services:
+
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: always
+
+  migrations:
+    build:
+      context: .
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGHOST: postgres
+      DISABLE_SSL: "true"
+      RESET_DB: "true"
+      INSERT_TEST_DATA: "true"
+    volumes:
+      - ./:/data
+    depends_on:
+      - postgres
+    restart: on-failure
+
+volumes:
+  postgres-data:

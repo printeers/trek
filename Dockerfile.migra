@@ -1,0 +1,16 @@
+FROM python:3.9-alpine
+
+RUN apk add git curl build-base libffi-dev openssl-dev postgresql-dev
+ENV CRYPTOGRAPHY_DONT_BUILD_RUST=1
+RUN pip install poetry psycopg2-binary
+
+RUN cd /tmp && \
+    git clone --depth=1 -b feature/privileges https://github.com/stack11/schemainspect && \
+    cd schemainspect && \
+    poetry build && \
+    pip install dist/schemainspect-3.0-py3-none-any.whl
+
+RUN cd /tmp && \
+    git clone --depth=1 https://github.com/djrobstep/migra && \
+    cd migra && \
+    pip install .
