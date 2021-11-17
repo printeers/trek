@@ -18,7 +18,7 @@ type Config struct {
 
 func ReadConfig() (*Config, error) {
 	var config *Config
-	file, err := os.ReadFile("config.yaml")
+	file, err := os.ReadFile("trek.yaml")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}

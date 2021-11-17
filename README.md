@@ -7,7 +7,7 @@ At least version 13 of postgres is needed.
 `go install .`
 
 ## Setup
-Create `config.yaml`:
+Create `trek.yaml`:
 ```yaml
 model_name: <model_name>
 db_name: <db_name>
