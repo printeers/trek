@@ -1,26 +1,16 @@
-name: Check golangci lint and publish docker images on main branch
+name: Publish docker images on tags branch
 
 on:
   push:
-  pull_request:
+    tags:
+      - v*
 
 permissions:
   contents: read
-  pull-requests: read
   packages: write
 
 jobs:
-  golangci:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v2
-        with:
-          version: v1.43.0
   build-and-push-images:
-    needs: golangci
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -33,13 +23,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract trek metadata for Docker
+        id: trek_meta
+        uses: docker/metadata-action@v3
+        with:
+          images: ghcr.io/stack11/trek
+
+      - name: Extract migra metadata for Docker
+        id: migra_meta
+        uses: docker/metadata-action@v3
+        with:
+          images: ghcr.io/stack11/trek/migra
+
       - name: Build and push trek Docker image
         uses: docker/build-push-action@v2
         with:
           context: .
           pull: true
           push: true
-          tags: ghcr.io/stack11/trek:latest
+          tags: ${{ steps.trek_meta.outputs.tags }}
 
       - name: Build and push migra Docker image
         uses: docker/build-push-action@v2
@@ -47,4 +49,4 @@ jobs:
           file: Dockerfile.migra
           pull: true
           push: true
-          tags: ghcr.io/stack11/trek/migra:latest
+          tags: ${{ steps.migra_meta.outputs.tags }}
