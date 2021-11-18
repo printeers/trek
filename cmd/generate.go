@@ -207,6 +207,14 @@ func updateDiff(config internal.Config, args []string) {
 		)
 		diff = strings.Trim(diff, "\n")
 
+		var lines []string
+		for _, line := range strings.Split(diff, "\n") {
+			if line != "" {
+				lines = append(lines, line)
+			}
+		}
+		diff = strings.Join(lines, "\n") + "\n"
+
 		//nolint:gosec
 		err = os.WriteFile(
 			filepath.Join(wd, "migrations", fmt.Sprintf("%s.up.sql", migrationName)),
