@@ -116,12 +116,12 @@ func PsqlFile(ip, user, password, sslmode, database, file string) error {
 }
 
 func PsqlHelperSetupDatabaseAndUsers(ip, user, password, sslmode, database string, users []string) error {
-	err := PsqlCommand(ip, user, password, sslmode, PGDefaultDatabase, fmt.Sprintf("CREATE DATABASE %s;", database))
+	err := PsqlCommand(ip, user, password, sslmode, PGDefaultDatabase, fmt.Sprintf("CREATE DATABASE %q;", database))
 	if err != nil {
 		return err
 	}
 	for _, u := range users {
-		err = PsqlCommand(ip, user, password, sslmode, PGDefaultDatabase, fmt.Sprintf("CREATE ROLE %s WITH LOGIN;", u))
+		err = PsqlCommand(ip, user, password, sslmode, PGDefaultDatabase, fmt.Sprintf("CREATE ROLE %q WITH LOGIN;", u))
 		if err != nil {
 			return err
 		}
@@ -137,7 +137,7 @@ func PsqlHelperSetupDatabaseAndUsersDrop(ip, user, password, sslmode, database s
 		password,
 		sslmode,
 		PGDefaultDatabase,
-		fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE)", database),
+		fmt.Sprintf("DROP DATABASE IF EXISTS %q WITH (FORCE)", database),
 	)
 	if err != nil {
 		return err
