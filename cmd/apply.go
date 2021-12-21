@@ -66,19 +66,19 @@ var applyCmd = &cobra.Command{
 			if err != nil {
 				log.Println(err)
 			}
+		}
 
-			// It will fail on roles that already exist, but that can be ignored
-			err = internal.PsqlHelperSetupDatabaseAndUsers(
-				pgHost,
-				pgUser,
-				pgPassword,
-				sslMode,
-				config.DatabaseName,
-				config.DatabaseUsers,
-			)
-			if err != nil {
-				log.Println(err)
-			}
+		// It will fail on roles that already exist, but that can be ignored
+		err = internal.PsqlHelperSetupDatabaseAndUsers(
+			pgHost,
+			pgUser,
+			pgPassword,
+			sslMode,
+			config.DatabaseName,
+			config.DatabaseUsers,
+		)
+		if err != nil {
+			log.Println(err)
 		}
 
 		m, err := migrate.New(fmt.Sprintf("file://%s", filepath.Join(wd, "migrations")), migrateDSN)
