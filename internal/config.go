@@ -11,6 +11,8 @@ import (
 
 const regexpStringValidIdentifier = `^[a-z_]+$`
 
+var regexpValidIdentifier = regexp.MustCompile(regexpStringValidIdentifier)
+
 var ErrInvalidValuesInConfig = errors.New("invalid values in config")
 
 type Config struct {
@@ -46,15 +48,14 @@ func ReadConfig() (*Config, error) {
 }
 
 func (c *Config) validate() (problems []string) {
-	var regexpValidIdentifier = regexp.MustCompile(regexpStringValidIdentifier)
-	if !regexpValidIdentifier.MatchString(c.ModelName) {
+	if !ValidateIdentifier(c.ModelName) {
 		p := fmt.Sprintf("Model name %q contains invalid characters. Must match %q.",
 			c.ModelName,
 			regexpStringValidIdentifier,
 		)
 		problems = append(problems, p)
 	}
-	if !regexpValidIdentifier.MatchString(c.DatabaseName) {
+	if !ValidateIdentifier(c.DatabaseName) {
 		p := fmt.Sprintf("Database name %q contains invalid characters. Must match %q.",
 			c.DatabaseName,
 			regexpStringValidIdentifier,
@@ -62,7 +63,7 @@ func (c *Config) validate() (problems []string) {
 		problems = append(problems, p)
 	}
 	for _, user := range c.DatabaseUsers {
-		if !regexpValidIdentifier.MatchString(user) {
+		if !ValidateIdentifier(user) {
 			p := fmt.Sprintf("Database user %q contains invalid characters. Must match %q.",
 				user,
 				regexpStringValidIdentifier,
@@ -72,4 +73,19 @@ func (c *Config) validate() (problems []string) {
 	}
 
 	return problems
+}
+
+func ValidateIdentifier(identifier string) bool {
+	return regexpValidIdentifier.MatchString(identifier)
+}
+
+func ValidateIdentifierList(identifiers []string) bool {
+	valid := true
+	for _, identifier := range identifiers {
+		if !regexpValidIdentifier.MatchString(identifier) {
+			valid = false
+		}
+	}
+
+	return valid
 }

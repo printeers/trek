@@ -1,4 +1,5 @@
-model_name: example
-db_name: example
+model_name: foo
+db_name: bar
 db_users:
-- example
+  - alice
+  - bob
