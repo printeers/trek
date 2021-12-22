@@ -3,7 +3,6 @@ module github.com/stack11/trek
 go 1.17
 
 require (
-	github.com/fsnotify/fsnotify v1.5.1
 	github.com/golang-migrate/migrate/v4 v4.15.1
 	github.com/spf13/cobra v1.2.1
 	github.com/thecodeteam/goodbye v0.0.0-20170927022442-a83968bda2d3

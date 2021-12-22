@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/spf13/cobra"
 	"github.com/thecodeteam/goodbye"
@@ -55,40 +55,10 @@ var generateCmd = &cobra.Command{
 		updateDiff(*config, args)
 
 		if !flagOnce {
-			watcher, err := fsnotify.NewWatcher()
-			if err != nil {
-				log.Fatalf("Failed to create fsnotify watcher: %v\n", err)
+			for {
+				time.Sleep(time.Millisecond * 100)
+				updateDiff(*config, args)
 			}
-			defer watcher.Close()
-
-			done := make(chan bool)
-
-			go func() {
-			Loop:
-				for {
-					select {
-					case <-watcher.Events:
-						updateDiff(*config, args)
-					case err = <-watcher.Errors:
-						log.Println(err)
-
-						break Loop
-					}
-				}
-				close(done)
-			}()
-
-			wd, err := os.Getwd()
-			if err != nil {
-				log.Fatalf("Failed to get working directory: %v\n", err)
-			}
-
-			err = watcher.Add(filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName)))
-			if err != nil {
-				log.Fatalf("Failed to watch model file: %v\n", err)
-			}
-
-			<-done
 		}
 	},
 }
