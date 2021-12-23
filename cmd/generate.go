@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -22,6 +24,10 @@ var (
 	flagDiffInitial bool
 	//nolint:gochecknoglobals
 	flagOnce bool
+)
+
+const (
+	regexpPartialLowerKebabCase = `[a-z][a-z0-9\-]*[a-z]`
 )
 
 //nolint:gochecknoinits
@@ -43,12 +49,26 @@ func init() {
 
 //nolint:gochecknoglobals
 var generateCmd = &cobra.Command{
-	Use:   "generate",
+	Use:   "generate [migration-name]",
 	Short: "Generate the migrations for a pgModeler file",
 	Args: func(cmd *cobra.Command, args []string) error {
-		if !flagDiffInitial && len(args) != 1 {
+		if len(args) == 0 {
+			if flagDiffInitial {
+				// migration-name argument is optional for `trek generate --initial`.
+				return nil
+			}
+
 			//nolint:goerr113
 			return errors.New("pass the name of the migration or use the -i/--initial flag for the initial migration")
+		} else if len(args) > 1 {
+			//nolint:goerr113
+			return errors.New("expecting one migration name, use lower-kebab-case for the migration name")
+		}
+
+		var regexpLowerKebabCase = regexp.MustCompile(`^` + regexpPartialLowerKebabCase + `$`)
+		if !regexpLowerKebabCase.MatchString(args[0]) {
+			//nolint:goerr113
+			return errors.New("migration name must be lower-kebab-case and must not start or end with a number or dash")
 		}
 
 		return nil
@@ -69,16 +89,40 @@ var generateCmd = &cobra.Command{
 			internal.DockerKillContainer(migrateContainerID)
 		})
 
-		if len(args) == 0 {
-			args = append(args, "")
+		var migrationName string
+		if len(args) > 0 {
+			migrationName = args[0]
+		} else if flagDiffInitial {
+			migrationName = "initial"
+		} else {
+			panic("invalid argument state")
 		}
 
-		updateDiff(*config, args[0], flagDiffInitial)
+		wd, err := os.Getwd()
+		if err != nil {
+			log.Fatalf("Failed to get working directory: %v\n", err)
+		}
+		migrationsDir := filepath.Join(wd, "migrations")
+		if _, err = os.Stat(migrationsDir); os.IsNotExist(err) {
+			err = os.Mkdir(migrationsDir, 0o755)
+			if err != nil {
+				log.Fatalf("Failed to create migrations directory: %v\n", err)
+			}
+		}
+
+		migrationsCount, err := inspectMigrations(migrationsDir)
+		if err != nil {
+			log.Fatalf("Error when inspecting the migrations directory: %v\n", err)
+		}
+		var newMigrationFileName = fmt.Sprintf("%03d_%s.up.sql", migrationsCount+1, migrationName)
+		var newMigrationFilePath = filepath.Join(wd, "migrations", newMigrationFileName)
+
+		updateDiff(*config, newMigrationFilePath, flagDiffInitial)
 
 		if !flagOnce {
 			for {
 				time.Sleep(time.Millisecond * 100)
-				updateDiff(*config, args[0], flagDiffInitial)
+				updateDiff(*config, newMigrationFilePath, flagDiffInitial)
 			}
 		}
 	},
@@ -94,7 +138,7 @@ var (
 )
 
 //nolint:cyclop
-func updateDiff(config internal.Config, migrationName string, initial bool) {
+func updateDiff(config internal.Config, newMigrationFilePath string, initial bool) {
 	wd, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("Failed to get working directory: %v\n", err)
@@ -109,14 +153,6 @@ func updateDiff(config internal.Config, migrationName string, initial bool) {
 		return
 	}
 	modelContent = mStr
-
-	migrationsDir := filepath.Join(wd, "migrations")
-	if _, err = os.Stat(migrationsDir); os.IsNotExist(err) {
-		err = os.Mkdir(migrationsDir, 0o755)
-		if err != nil {
-			log.Fatalf("Failed to create migrations directory: %v\n", err)
-		}
-	}
 
 	targetContainerID, err = internal.DockerRunPostgresContainer()
 	if err != nil {
@@ -160,7 +196,7 @@ func updateDiff(config internal.Config, migrationName string, initial bool) {
 		}
 
 		//nolint:gosec
-		err = os.WriteFile(filepath.Join(wd, "migrations", "001_init.up.sql"), input, 0o644)
+		err = os.WriteFile(newMigrationFilePath, input, 0o644)
 		if err != nil {
 			log.Panicln(err)
 		}
@@ -168,12 +204,12 @@ func updateDiff(config internal.Config, migrationName string, initial bool) {
 		return
 	}
 
-	migrateDSN, err := setupMigrateDatabase(wd, config, migrationName, migrateContainerID)
+	migrateDSN, err := setupMigrateDatabase(config, newMigrationFilePath, migrateContainerID)
 	if err != nil {
 		log.Panicln(err)
 	}
 
-	targetDSN, err := setupTargetDatabase(wd, config, targetContainerID)
+	targetDSN, err := setupTargetDatabase(config, targetContainerID)
 	if err != nil {
 		log.Panicln(err)
 	}
@@ -211,7 +247,7 @@ func updateDiff(config internal.Config, migrationName string, initial bool) {
 
 	//nolint:gosec
 	err = os.WriteFile(
-		filepath.Join(wd, "migrations", fmt.Sprintf("%s.up.sql", migrationName)),
+		newMigrationFilePath,
 		[]byte(diff),
 		0o644,
 	)
@@ -220,17 +256,21 @@ func updateDiff(config internal.Config, migrationName string, initial bool) {
 	}
 }
 
-func setupMigrateDatabase(wd string, config internal.Config, migrationName, migrateContainerID string) (string, error) {
+func setupMigrateDatabase(config internal.Config, newMigrationFilePath, migrateContainerID string) (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Failed to get working directory: %v\n", err)
+	}
+
 	targetIP, err := setupDatabase(migrateContainerID, config)
 	if err != nil {
 		return "", err
 	}
 
-	migrationFile := filepath.Join(wd, "migrations", fmt.Sprintf("%s.up.sql", migrationName))
-	if _, err = os.Stat(migrationFile); err == nil {
-		err = os.Remove(migrationFile)
+	if _, err = os.Stat(newMigrationFilePath); err == nil {
+		err = os.Remove(newMigrationFilePath)
 		if err != nil {
-			return "", fmt.Errorf("failed to delete existing migration file: %w", err)
+			return "", fmt.Errorf("failed to delete generated migration file: %w", err)
 		}
 	}
 
@@ -247,7 +287,12 @@ func setupMigrateDatabase(wd string, config internal.Config, migrationName, migr
 	return migrateDSN, nil
 }
 
-func setupTargetDatabase(wd string, config internal.Config, targetContainerID string) (string, error) {
+func setupTargetDatabase(config internal.Config, targetContainerID string) (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Failed to get working directory: %v\n", err)
+	}
+
 	targetIP, err := setupDatabase(targetContainerID, config)
 	if err != nil {
 		return "", fmt.Errorf("failed to setup database: %w", err)
@@ -288,4 +333,26 @@ func setupDatabase(containerName string, config internal.Config) (containerIP st
 	}
 
 	return ip, nil
+}
+
+func inspectMigrations(migrationsDir string) (migrationsCount uint, err error) {
+	err = filepath.WalkDir(migrationsDir, func(path string, d fs.DirEntry, err error) error {
+		if path == migrationsDir {
+			return nil
+		}
+		if d.IsDir() {
+			return filepath.SkipDir
+		}
+		var regexpValidMigrationFilename = regexp.MustCompile(`^\d{3}_` + regexpPartialLowerKebabCase + `\.up\.sql$`)
+		if !regexpValidMigrationFilename.MatchString(d.Name()) {
+			//nolint:goerr113
+			return fmt.Errorf("invalid existing migration filename %q", d.Name())
+		}
+		migrationsCount++
+
+		return nil
+	})
+
+	//nolint:wrapcheck
+	return migrationsCount, err
 }
