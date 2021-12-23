@@ -153,7 +153,8 @@ func updateDiff(config internal.Config, migrationName string, initial bool) {
 	if initial {
 		// If we are developing the schema initially, there will be no diffs,
 		// and we want to copy over the schema file to the initial migration file
-		input, err := os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)))
+		var input []byte
+		input, err = os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)))
 		if err != nil {
 			log.Panicln(err)
 		}
