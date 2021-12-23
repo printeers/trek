@@ -157,62 +157,65 @@ func updateDiff(config internal.Config, migrationName string, initial bool) {
 		if err != nil {
 			log.Panicln(err)
 		}
+
 		//nolint:gosec
 		err = os.WriteFile(filepath.Join(wd, "migrations", "001_init.up.sql"), input, 0o644)
 		if err != nil {
 			log.Panicln(err)
 		}
-	} else {
-		migrateDSN, err := setupMigrateDatabase(wd, config, migrationName, migrateContainerID)
-		if err != nil {
-			log.Panicln(err)
-		}
 
-		targetDSN, err := setupTargetDatabase(wd, config, targetContainerID)
-		if err != nil {
-			log.Panicln(err)
-		}
+		return
+	}
 
-		diff, err := internal.Migra(migrateDSN, targetDSN)
-		if err != nil {
-			log.Panicln(err)
-		}
+	migrateDSN, err := setupMigrateDatabase(wd, config, migrationName, migrateContainerID)
+	if err != nil {
+		log.Panicln(err)
+	}
 
-		// Filter stuff from go-migrate that doesn't exist in the target db, and we don't have and need anyway
-		diff = strings.ReplaceAll(
-			diff,
-			"alter table \"public\".\"schema_migrations\" drop constraint \"schema_migrations_pkey\";",
-			"",
-		)
-		diff = strings.ReplaceAll(
-			diff,
-			"drop index if exists \"public\".\"schema_migrations_pkey\";",
-			"",
-		)
-		diff = strings.ReplaceAll(
-			diff,
-			"drop table \"public\".\"schema_migrations\";",
-			"",
-		)
-		diff = strings.Trim(diff, "\n")
+	targetDSN, err := setupTargetDatabase(wd, config, targetContainerID)
+	if err != nil {
+		log.Panicln(err)
+	}
 
-		var lines []string
-		for _, line := range strings.Split(diff, "\n") {
-			if line != "" {
-				lines = append(lines, line)
-			}
-		}
-		diff = strings.Join(lines, "\n") + "\n"
+	diff, err := internal.Migra(migrateDSN, targetDSN)
+	if err != nil {
+		log.Panicln(err)
+	}
 
-		//nolint:gosec
-		err = os.WriteFile(
-			filepath.Join(wd, "migrations", fmt.Sprintf("%s.up.sql", migrationName)),
-			[]byte(diff),
-			0o644,
-		)
-		if err != nil {
-			log.Panicln(err)
+	// Filter stuff from go-migrate that doesn't exist in the target db, and we don't have and need anyway
+	diff = strings.ReplaceAll(
+		diff,
+		"alter table \"public\".\"schema_migrations\" drop constraint \"schema_migrations_pkey\";",
+		"",
+	)
+	diff = strings.ReplaceAll(
+		diff,
+		"drop index if exists \"public\".\"schema_migrations_pkey\";",
+		"",
+	)
+	diff = strings.ReplaceAll(
+		diff,
+		"drop table \"public\".\"schema_migrations\";",
+		"",
+	)
+	diff = strings.Trim(diff, "\n")
+
+	var lines []string
+	for _, line := range strings.Split(diff, "\n") {
+		if line != "" {
+			lines = append(lines, line)
 		}
+	}
+	diff = strings.Join(lines, "\n") + "\n"
+
+	//nolint:gosec
+	err = os.WriteFile(
+		filepath.Join(wd, "migrations", fmt.Sprintf("%s.up.sql", migrationName)),
+		[]byte(diff),
+		0o644,
+	)
+	if err != nil {
+		log.Panicln(err)
 	}
 }
 
