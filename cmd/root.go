@@ -15,20 +15,8 @@ var rootCmd = &cobra.Command{
 
 func Execute() {
 	rootCmd.AddCommand(applyCmd)
-	generateCmd.Flags().BoolVarP(
-		&flagDiffInitial,
-		"initial",
-		"i",
-		false,
-		"Directly copy the diff to the migrations. Used for first time setup",
-	)
-	generateCmd.Flags().BoolVar(
-		&flagOnce,
-		"once",
-		false,
-		"Run only once and don't watch files",
-	)
 	rootCmd.AddCommand(generateCmd)
+	rootCmd.AddCommand(initCmd)
 	if err := rootCmd.Execute(); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

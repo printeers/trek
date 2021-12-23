@@ -7,7 +7,9 @@ WORKDIR /trek
 RUN go mod download
 
 # Add source and build the actual component
-COPY . /trek
+COPY ./cmd /trek/cmd
+COPY ./internal /trek/internal
+COPY ./main.go /trek
 RUN go build -o dist/bin/trek .
 
 FROM alpine:latest

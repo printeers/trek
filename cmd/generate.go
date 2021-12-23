@@ -24,6 +24,23 @@ var (
 	flagOnce bool
 )
 
+//nolint:gochecknoinits
+func init() {
+	generateCmd.Flags().BoolVarP(
+		&flagDiffInitial,
+		"initial",
+		"i",
+		false,
+		"Directly copy the diff to the migrations. Used for first time setup",
+	)
+	generateCmd.Flags().BoolVar(
+		&flagOnce,
+		"once",
+		false,
+		"Run only once and don't watch files",
+	)
+}
+
 //nolint:gochecknoglobals
 var generateCmd = &cobra.Command{
 	Use:   "generate",
@@ -52,12 +69,16 @@ var generateCmd = &cobra.Command{
 			internal.DockerKillContainer(migrateContainerID)
 		})
 
-		updateDiff(*config, args)
+		if len(args) == 0 {
+			args = append(args, "")
+		}
+
+		updateDiff(*config, args[0], flagDiffInitial)
 
 		if !flagOnce {
 			for {
 				time.Sleep(time.Millisecond * 100)
-				updateDiff(*config, args)
+				updateDiff(*config, args[0], flagDiffInitial)
 			}
 		}
 	},
@@ -73,7 +94,7 @@ var (
 )
 
 //nolint:cyclop
-func updateDiff(config internal.Config, args []string) {
+func updateDiff(config internal.Config, migrationName string, initial bool) {
 	wd, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("Failed to get working directory: %v\n", err)
@@ -129,7 +150,7 @@ func updateDiff(config internal.Config, args []string) {
 		log.Panicln(err)
 	}
 
-	if flagDiffInitial {
+	if initial {
 		// If we are developing the schema initially, there will be no diffs,
 		// and we want to copy over the schema file to the initial migration file
 		input, err := os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)))
@@ -142,8 +163,6 @@ func updateDiff(config internal.Config, args []string) {
 			log.Panicln(err)
 		}
 	} else {
-		migrationName := args[0]
-
 		migrateDSN, err := setupMigrateDatabase(wd, config, migrationName, migrateContainerID)
 		if err != nil {
 			log.Panicln(err)
