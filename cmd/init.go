@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -148,7 +149,12 @@ var initCmd = &cobra.Command{
 			internal.DockerKillContainer(migrateContainerID)
 		})
 
-		updateDiff(*config, "", true)
+		wd, err := os.Getwd()
+		if err != nil {
+			log.Fatalf("Failed to get working directory: %v\n", err)
+		}
+
+		updateDiff(*config, filepath.Join(wd, "migrations", "001_init.up.sql"), true)
 	},
 }
 
