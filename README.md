@@ -18,11 +18,12 @@ db_users:
 
 Create `<model_name>.dbm` using pgModeler.
 
-## Initial migration
-`trek generate -i`
+## Creating migrations
 
-## Further migrations
-`trek generate 002_some_migration`
+`trek generate some-migration`
+
+Use the `--dev` flag to continuously watch for file changes.
 
 ## Applying the migrations
+
 Take a look at the `example/` directory.
