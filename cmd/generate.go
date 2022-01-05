@@ -21,9 +21,9 @@ import (
 
 var (
 	//nolint:gochecknoglobals
-	flagDiffInitial bool
+	flagDev bool
 	//nolint:gochecknoglobals
-	flagOnce bool
+	flagCleanup bool
 )
 
 const (
@@ -32,18 +32,17 @@ const (
 
 //nolint:gochecknoinits
 func init() {
-	generateCmd.Flags().BoolVarP(
-		&flagDiffInitial,
-		"initial",
-		"i",
+	generateCmd.Flags().BoolVar(
+		&flagDev,
+		"dev",
 		false,
-		"Directly copy the diff to the migrations. Used for first time setup",
+		"Watch for file changes and automatically regenerate the migration file",
 	)
 	generateCmd.Flags().BoolVar(
-		&flagOnce,
-		"once",
-		false,
-		"Run only once and don't watch files",
+		&flagCleanup,
+		"cleanup",
+		true,
+		"Remove the generated migrations file. Only works with --dev",
 	)
 }
 
@@ -53,13 +52,8 @@ var generateCmd = &cobra.Command{
 	Short: "Generate the migrations for a pgModeler file",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			if flagDiffInitial {
-				// migration-name argument is optional for `trek generate --initial`.
-				return nil
-			}
-
 			//nolint:goerr113
-			return errors.New("pass the name of the migration or use the -i/--initial flag for the initial migration")
+			return errors.New("pass the name of the migration")
 		} else if len(args) > 1 {
 			//nolint:goerr113
 			return errors.New("expecting one migration name, use lower-kebab-case for the migration name")
@@ -81,51 +75,58 @@ var generateCmd = &cobra.Command{
 			log.Fatalf("Failed to read config: %v\n", err)
 		}
 
+		migrationName := args[0]
+		newMigrationFilePath, initial := getNewMigrationFilePath(migrationName)
+
 		ctx := context.Background()
 		defer goodbye.Exit(ctx, -1)
 		goodbye.Notify(ctx)
 		goodbye.Register(func(ctx context.Context, sig os.Signal) {
 			internal.DockerKillContainer(targetContainerID)
 			internal.DockerKillContainer(migrateContainerID)
+
+			if flagDev && flagCleanup {
+				if _, err := os.Stat(newMigrationFilePath); err == nil {
+					err = os.Remove(newMigrationFilePath)
+					if err != nil {
+						log.Fatalf("failed to delete new migration file: %v\n", err)
+					}
+				}
+			}
 		})
 
-		var migrationName string
-		if len(args) > 0 {
-			migrationName = args[0]
-		} else if flagDiffInitial {
-			migrationName = "initial"
-		} else {
-			panic("invalid argument state")
-		}
+		updateDiff(*config, newMigrationFilePath, initial)
 
-		wd, err := os.Getwd()
-		if err != nil {
-			log.Fatalf("Failed to get working directory: %v\n", err)
-		}
-		migrationsDir := filepath.Join(wd, "migrations")
-		if _, err = os.Stat(migrationsDir); os.IsNotExist(err) {
-			err = os.Mkdir(migrationsDir, 0o755)
-			if err != nil {
-				log.Fatalf("Failed to create migrations directory: %v\n", err)
-			}
-		}
-
-		migrationsCount, err := inspectMigrations(migrationsDir)
-		if err != nil {
-			log.Fatalf("Error when inspecting the migrations directory: %v\n", err)
-		}
-		var newMigrationFileName = fmt.Sprintf("%03d_%s.up.sql", migrationsCount+1, migrationName)
-		var newMigrationFilePath = filepath.Join(wd, "migrations", newMigrationFileName)
-
-		updateDiff(*config, newMigrationFilePath, flagDiffInitial)
-
-		if !flagOnce {
+		if flagDev {
 			for {
 				time.Sleep(time.Millisecond * 100)
-				updateDiff(*config, newMigrationFilePath, flagDiffInitial)
+				updateDiff(*config, newMigrationFilePath, initial)
 			}
 		}
 	},
+}
+
+func getNewMigrationFilePath(migrationName string) (path string, initial bool) {
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Failed to get working directory: %v\n", err)
+	}
+	migrationsDir := filepath.Join(wd, "migrations")
+	if _, err = os.Stat(migrationsDir); os.IsNotExist(err) {
+		err = os.Mkdir(migrationsDir, 0o755)
+		if err != nil {
+			log.Fatalf("Failed to create migrations directory: %v\n", err)
+		}
+	}
+
+	migrationsCount, err := inspectMigrations(migrationsDir)
+	if err != nil {
+		log.Fatalf("Error when inspecting the migrations directory: %v\n", err)
+	}
+	var newMigrationFileName = fmt.Sprintf("%03d_%s.up.sql", migrationsCount+1, migrationName)
+	var newMigrationFilePath = filepath.Join(wd, "migrations", newMigrationFileName)
+
+	return newMigrationFilePath, migrationsCount == 0
 }
 
 var (
@@ -254,6 +255,8 @@ func updateDiff(config internal.Config, newMigrationFilePath string, initial boo
 	if err != nil {
 		log.Panicln(err)
 	}
+
+	log.Println("Wrote migration file")
 }
 
 func setupMigrateDatabase(config internal.Config, newMigrationFilePath, migrateContainerID string) (string, error) {
