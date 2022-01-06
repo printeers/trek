@@ -106,10 +106,12 @@ var applyCmd = &cobra.Command{
 						if strings.HasPrefix(path.Base(p), fmt.Sprintf("%03d", index+1)) {
 							log.Printf("Inserting test data %s\n", path.Base(p))
 
-							return fmt.Errorf(
-								"failed to apply test data: %w",
-								internal.PsqlFile(pgHost, pgUser, pgPassword, sslMode, config.DatabaseName, p),
-							)
+							err := internal.PsqlFile(pgHost, pgUser, pgPassword, sslMode, config.DatabaseName, p)
+							if err != nil {
+								return fmt.Errorf("failed to apply test data: %w", err)
+							}
+
+							return nil
 						}
 
 						return nil
