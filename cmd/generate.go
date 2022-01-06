@@ -227,6 +227,12 @@ func updateDiff(config *internal.Config, newMigrationFilePath string, initial bo
 	}
 
 	if initial {
+		// Verify the schema is correct by applying it to the database
+		_, err = setupTargetDatabase(config, targetContainerID)
+		if err != nil {
+			log.Panicln(fmt.Errorf("failed to validate initial schema: %w", err))
+		}
+
 		// If we are developing the schema initially, there will be no diffs,
 		// and we want to copy over the schema file to the initial migration file
 		var input []byte
