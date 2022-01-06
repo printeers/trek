@@ -78,7 +78,7 @@ var generateCmd = &cobra.Command{
 
 		migrationName := args[0]
 		newMigrationFilePath, migrationNumber := getNewMigrationFilePath(migrationName)
-		initial := migrationNumber == 0
+		initial := migrationNumber == 1
 
 		ctx := context.Background()
 		defer goodbye.Exit(ctx, -1)
@@ -165,7 +165,7 @@ func getNewMigrationFilePath(migrationName string) (path string, migrationNumber
 	var newMigrationFileName = fmt.Sprintf("%03d_%s.up.sql", migrationsCount+1, migrationName)
 	var newMigrationFilePath = filepath.Join(wd, "migrations", newMigrationFileName)
 
-	return newMigrationFilePath, migrationsCount
+	return newMigrationFilePath, migrationsCount + 1
 }
 
 var (
