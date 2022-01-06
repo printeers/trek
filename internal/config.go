@@ -21,7 +21,13 @@ type Config struct {
 	//nolint:tagliatelle
 	DatabaseName string `yaml:"db_name"`
 	//nolint:tagliatelle
-	DatabaseUsers []string `yaml:"db_users"`
+	DatabaseUsers []string   `yaml:"db_users"`
+	Templates     []template `yaml:"templates"`
+}
+
+type template struct {
+	Path    string `yaml:"path"`
+	Content string `yaml:"content"`
 }
 
 func ReadConfig() (*Config, error) {

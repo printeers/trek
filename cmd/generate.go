@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -76,7 +77,8 @@ var generateCmd = &cobra.Command{
 		}
 
 		migrationName := args[0]
-		newMigrationFilePath, initial := getNewMigrationFilePath(migrationName)
+		newMigrationFilePath, migrationNumber := getNewMigrationFilePath(migrationName)
+		initial := migrationNumber == 0
 
 		ctx := context.Background()
 		defer goodbye.Exit(ctx, -1)
@@ -86,7 +88,7 @@ var generateCmd = &cobra.Command{
 			internal.DockerKillContainer(migrateContainerID)
 
 			if flagDev && flagCleanup {
-				if _, err := os.Stat(newMigrationFilePath); err == nil {
+				if _, err = os.Stat(newMigrationFilePath); err == nil {
 					err = os.Remove(newMigrationFilePath)
 					if err != nil {
 						log.Fatalf("failed to delete new migration file: %v\n", err)
@@ -95,18 +97,55 @@ var generateCmd = &cobra.Command{
 			}
 		})
 
-		updateDiff(*config, newMigrationFilePath, initial)
+		if updateDiff(config, newMigrationFilePath, initial) {
+			err = writeTemplateFiles(config, migrationNumber)
+			if err != nil {
+				log.Fatalf("Failed to write template files: %v\n", err)
+			}
+		}
 
 		if flagDev {
 			for {
 				time.Sleep(time.Millisecond * 100)
-				updateDiff(*config, newMigrationFilePath, initial)
+				if updateDiff(config, newMigrationFilePath, initial) {
+					err = writeTemplateFiles(config, migrationNumber)
+					if err != nil {
+						log.Fatalf("Failed to write template files: %v\n", err)
+					}
+				}
 			}
 		}
 	},
 }
 
-func getNewMigrationFilePath(migrationName string) (path string, initial bool) {
+func writeTemplateFiles(config *internal.Config, newVersion uint) error {
+	for _, ts := range config.Templates {
+		t, err := template.New(ts.Path).Parse(ts.Content)
+		if err != nil {
+			return fmt.Errorf("failed to parse template: %w", err)
+		}
+
+		dir := filepath.Dir(ts.Path)
+		err = os.MkdirAll(dir, 0o755)
+		if err != nil {
+			return fmt.Errorf("failed to create %s: %w", dir, err)
+		}
+
+		f, err := os.Create(ts.Path)
+		if err != nil {
+			return fmt.Errorf("failed to create file %s: %w", ts.Path, err)
+		}
+
+		err = t.Execute(f, map[string]interface{}{"NewVersion": newVersion})
+		if err != nil {
+			return fmt.Errorf("failed to execute template: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func getNewMigrationFilePath(migrationName string) (path string, migrationNumber uint) {
 	wd, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("Failed to get working directory: %v\n", err)
@@ -126,7 +165,7 @@ func getNewMigrationFilePath(migrationName string) (path string, initial bool) {
 	var newMigrationFileName = fmt.Sprintf("%03d_%s.up.sql", migrationsCount+1, migrationName)
 	var newMigrationFilePath = filepath.Join(wd, "migrations", newMigrationFileName)
 
-	return newMigrationFilePath, migrationsCount == 0
+	return newMigrationFilePath, migrationsCount
 }
 
 var (
@@ -139,7 +178,7 @@ var (
 )
 
 //nolint:cyclop
-func updateDiff(config internal.Config, newMigrationFilePath string, initial bool) {
+func updateDiff(config *internal.Config, newMigrationFilePath string, initial bool) bool {
 	wd, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("Failed to get working directory: %v\n", err)
@@ -151,7 +190,7 @@ func updateDiff(config internal.Config, newMigrationFilePath string, initial boo
 	}
 	mStr := strings.TrimSuffix(string(m), "\n")
 	if mStr == "" || mStr == modelContent {
-		return
+		return false
 	}
 	modelContent = mStr
 
@@ -202,7 +241,7 @@ func updateDiff(config internal.Config, newMigrationFilePath string, initial boo
 			log.Panicln(err)
 		}
 
-		return
+		return true
 	}
 
 	migrateDSN, err := setupMigrateDatabase(config, newMigrationFilePath, migrateContainerID)
@@ -257,9 +296,11 @@ func updateDiff(config internal.Config, newMigrationFilePath string, initial boo
 	}
 
 	log.Println("Wrote migration file")
+
+	return true
 }
 
-func setupMigrateDatabase(config internal.Config, newMigrationFilePath, migrateContainerID string) (string, error) {
+func setupMigrateDatabase(config *internal.Config, newMigrationFilePath, migrateContainerID string) (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("Failed to get working directory: %v\n", err)
@@ -290,7 +331,7 @@ func setupMigrateDatabase(config internal.Config, newMigrationFilePath, migrateC
 	return migrateDSN, nil
 }
 
-func setupTargetDatabase(config internal.Config, targetContainerID string) (string, error) {
+func setupTargetDatabase(config *internal.Config, targetContainerID string) (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("Failed to get working directory: %v\n", err)
@@ -316,7 +357,7 @@ func setupTargetDatabase(config internal.Config, targetContainerID string) (stri
 	return fmt.Sprintf("postgresql://postgres:postgres@%s:5432/%s?sslmode=disable", targetIP, config.DatabaseName), nil
 }
 
-func setupDatabase(containerName string, config internal.Config) (containerIP string, err error) {
+func setupDatabase(containerName string, config *internal.Config) (containerIP string, err error) {
 	ip, err := internal.DockerGetContainerIP(containerName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get container IP: %w", err)

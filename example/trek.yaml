@@ -3,3 +3,10 @@ db_name: bar
 db_users:
   - alice
   - bob
+templates:
+  - path: dbversion/version.go
+    content: |
+      package dbversion
+
+      // LatestVersion is the latest version for the db migrations.
+      const LatestVersion = {{.NewVersion}}
