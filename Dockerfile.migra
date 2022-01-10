@@ -1,16 +1,24 @@
-FROM python:3.9-alpine
+FROM python:3.10-alpine as build
 
-RUN apk add git curl build-base libffi-dev openssl-dev postgresql-dev
-ENV CRYPTOGRAPHY_DONT_BUILD_RUST=1
-RUN pip install poetry psycopg2-binary
+RUN apk add git build-base libffi-dev
+#ENV CRYPTOGRAPHY_DONT_BUILD_RUST=1
+RUN pip install poetry pyinstaller psycopg2-binary
 
-RUN cd /tmp && \
-    git clone --depth=1 -b feature/privileges https://github.com/stack11/schemainspect && \
+WORKDIR /app
+
+RUN git clone --depth=1 -b feature/privileges https://github.com/stack11/schemainspect && \
     cd schemainspect && \
     poetry build && \
-    pip install dist/schemainspect-3.0-py3-none-any.whl
+    pip install dist/schemainspect-*-none-any.whl
 
-RUN cd /tmp && \
-    git clone --depth=1 https://github.com/djrobstep/migra && \
-    cd migra && \
+RUN git clone --depth=1 https://github.com/djrobstep/sqlbag && \
+    cd sqlbag && \
     pip install .
+
+RUN git clone --depth=1 https://github.com/djrobstep/migra && \
+    cd migra && \
+    printf "from migra.command import do_command\ndo_command()" > main.py && \
+    pyinstaller main.py --onefile --name migra --collect-data schemainspect
+
+FROM alpine
+COPY --from=build /app/migra/dist/migra /usr/local/bin/migra
