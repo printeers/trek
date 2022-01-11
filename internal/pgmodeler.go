@@ -6,8 +6,6 @@ import (
 	"os/exec"
 )
 
-const PgmodelerCliDockerImage = "geertjohan/pgmodeler-cli:latest"
-
 func PgModelerExportToFile(input, output string) error {
 	//nolint:gosec
 	err := os.WriteFile(output, []byte{}, 0o644)
@@ -16,14 +14,6 @@ func PgModelerExportToFile(input, output string) error {
 	}
 	//nolint:gosec
 	cmdPgModeler := exec.Command(
-		"docker",
-		"run",
-		"--rm",
-		"-v",
-		fmt.Sprintf("%s:%s", input, input),
-		"-v",
-		fmt.Sprintf("%s:%s:Z", output, output),
-		PgmodelerCliDockerImage,
 		"pgmodeler-cli",
 		"--input",
 		input,
@@ -50,14 +40,6 @@ func PgModelerExportToPng(input, output string) error {
 	}
 	//nolint:gosec
 	cmdPgModeler := exec.Command(
-		"docker",
-		"run",
-		"--rm",
-		"-v",
-		fmt.Sprintf("%s:%s", input, input),
-		"-v",
-		fmt.Sprintf("%s:%s:Z", output, output),
-		PgmodelerCliDockerImage,
 		"pgmodeler-cli",
 		"--input",
 		input,
