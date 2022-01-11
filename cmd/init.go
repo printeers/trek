@@ -154,11 +154,7 @@ var initCmd = &cobra.Command{
 			log.Fatalf("Failed to get working directory: %v\n", err)
 		}
 
-		updateDiff(config, filepath.Join(wd, "migrations", "001_init.up.sql"), true)
-		err = writeTemplateFiles(config, 1)
-		if err != nil {
-			log.Fatalf("Failed to write template files: %v\n", err)
-		}
+		run(config, filepath.Join(wd, "migrations", "001_init.up.sql"), 1)
 	},
 }
 

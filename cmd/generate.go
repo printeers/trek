@@ -77,8 +77,10 @@ var generateCmd = &cobra.Command{
 		}
 
 		migrationName := args[0]
-		newMigrationFilePath, migrationNumber := getNewMigrationFilePath(migrationName)
-		initial := migrationNumber == 1
+		newMigrationFilePath, migrationNumber, err := getNewMigrationFilePath(migrationName)
+		if err != nil {
+			log.Fatalf("Failed to get new migration file path: %v\n", err)
+		}
 
 		ctx := context.Background()
 		defer goodbye.Exit(ctx, -1)
@@ -91,31 +93,34 @@ var generateCmd = &cobra.Command{
 				if _, err = os.Stat(newMigrationFilePath); err == nil {
 					err = os.Remove(newMigrationFilePath)
 					if err != nil {
-						log.Fatalf("failed to delete new migration file: %v\n", err)
+						log.Printf("failed to delete new migration file: %v\n", err)
 					}
 				}
 			}
 		})
 
-		if updateDiff(config, newMigrationFilePath, initial) {
-			err = writeTemplateFiles(config, migrationNumber)
-			if err != nil {
-				log.Fatalf("Failed to write template files: %v\n", err)
-			}
-		}
+		run(config, newMigrationFilePath, migrationNumber)
 
 		if flagDev {
 			for {
 				time.Sleep(time.Millisecond * 100)
-				if updateDiff(config, newMigrationFilePath, initial) {
-					err = writeTemplateFiles(config, migrationNumber)
-					if err != nil {
-						log.Fatalf("Failed to write template files: %v\n", err)
-					}
-				}
+				run(config, newMigrationFilePath, migrationNumber)
 			}
 		}
 	},
+}
+
+func run(config *internal.Config, newMigrationFilePath string, migrationNumber uint) {
+	updated, err := updateDiff(config, newMigrationFilePath, migrationNumber == 1)
+	if err != nil && !errors.Is(err, ErrInvalidModel) {
+		log.Fatalf("Failed to generate diff: %v\n", err)
+	}
+	if updated {
+		err = writeTemplateFiles(config, migrationNumber)
+		if err != nil {
+			log.Fatalf("Failed to write template files: %v\n", err)
+		}
+	}
 }
 
 func writeTemplateFiles(config *internal.Config, newVersion uint) error {
@@ -145,27 +150,27 @@ func writeTemplateFiles(config *internal.Config, newVersion uint) error {
 	return nil
 }
 
-func getNewMigrationFilePath(migrationName string) (path string, migrationNumber uint) {
+func getNewMigrationFilePath(migrationName string) (path string, migrationNumber uint, err error) {
 	wd, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("Failed to get working directory: %v\n", err)
+		return "", 0, fmt.Errorf("failed to get working directory: %w", err)
 	}
 	migrationsDir := filepath.Join(wd, "migrations")
 	if _, err = os.Stat(migrationsDir); os.IsNotExist(err) {
 		err = os.Mkdir(migrationsDir, 0o755)
 		if err != nil {
-			log.Fatalf("Failed to create migrations directory: %v\n", err)
+			return "", 0, fmt.Errorf("failed to create migrations directory: %w", err)
 		}
 	}
 
 	migrationsCount, err := inspectMigrations(migrationsDir)
 	if err != nil {
-		log.Fatalf("Error when inspecting the migrations directory: %v\n", err)
+		return "", 0, fmt.Errorf("failed to inspect migrations directory: %w", err)
 	}
 	var newMigrationFileName = fmt.Sprintf("%03d_%s.up.sql", migrationsCount+1, migrationName)
 	var newMigrationFilePath = filepath.Join(wd, "migrations", newMigrationFileName)
 
-	return newMigrationFilePath, migrationsCount + 1
+	return newMigrationFilePath, migrationsCount + 1, nil
 }
 
 var (
@@ -177,30 +182,42 @@ var (
 	migrateContainerID = ""
 )
 
+func exportToPng(config *internal.Config, wd string) {
+	err := internal.PgModelerExportToPng(
+		filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName)),
+		filepath.Join(wd, fmt.Sprintf("%s.png", config.ModelName)),
+	)
+	if err != nil {
+		log.Println(err)
+	}
+}
+
+var ErrInvalidModel = errors.New("invalid model")
+
 //nolint:cyclop
-func updateDiff(config *internal.Config, newMigrationFilePath string, initial bool) bool {
+func updateDiff(config *internal.Config, newMigrationFilePath string, initial bool) (updated bool, err error) {
 	wd, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("Failed to get working directory: %v\n", err)
+		return false, fmt.Errorf("failed to get working directory: %w", err)
 	}
 
 	m, err := os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName)))
 	if err != nil {
-		log.Fatalln(err)
+		return false, fmt.Errorf("failed to read model file: %w", err)
 	}
 	mStr := strings.TrimSuffix(string(m), "\n")
 	if mStr == "" || mStr == modelContent {
-		return false
+		return false, nil
 	}
 	modelContent = mStr
 
 	targetContainerID, err = internal.DockerRunPostgresContainer()
 	if err != nil {
-		log.Fatalf("Failed to create target container: %v\n", err)
+		return false, fmt.Errorf("failed to create target container: %w", err)
 	}
 	migrateContainerID, err = internal.DockerRunPostgresContainer()
 	if err != nil {
-		log.Fatalf("Failed to create migrate container: %v\n", err)
+		return false, fmt.Errorf("failed to create migrate container: %w", err)
 	}
 
 	defer func() {
@@ -208,29 +225,25 @@ func updateDiff(config *internal.Config, newMigrationFilePath string, initial bo
 		internal.DockerKillContainer(migrateContainerID)
 	}()
 
-	go func() {
-		err = internal.PgModelerExportToPng(
-			filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName)),
-			filepath.Join(wd, fmt.Sprintf("%s.png", config.ModelName)),
-		)
-		if err != nil {
-			log.Panicln(err)
-		}
-	}()
+	go exportToPng(config, wd)
 
 	err = internal.PgModelerExportToFile(
 		filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName)),
 		filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)),
 	)
 	if err != nil {
-		log.Panicln(err)
+		log.Println(err)
+
+		return false, ErrInvalidModel
 	}
 
 	if initial {
 		// Verify the schema is correct by applying it to the database
 		_, err = setupTargetDatabase(config, targetContainerID)
 		if err != nil {
-			log.Panicln(fmt.Errorf("failed to validate initial schema: %w", err))
+			log.Println(err)
+
+			return false, ErrInvalidModel
 		}
 
 		// If we are developing the schema initially, there will be no diffs,
@@ -238,31 +251,35 @@ func updateDiff(config *internal.Config, newMigrationFilePath string, initial bo
 		var input []byte
 		input, err = os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)))
 		if err != nil {
-			log.Panicln(err)
+			return false, fmt.Errorf("failed to read sql file: %w", err)
 		}
 
 		//nolint:gosec
 		err = os.WriteFile(newMigrationFilePath, input, 0o644)
 		if err != nil {
-			log.Panicln(err)
+			return false, fmt.Errorf("failed to write migration file: %w", err)
 		}
 
-		return true
+		return true, nil
 	}
 
 	migrateDSN, err := setupMigrateDatabase(config, newMigrationFilePath, migrateContainerID)
 	if err != nil {
-		log.Panicln(err)
+		return false, fmt.Errorf("failed to setup migrate database: %w", err)
 	}
 
 	targetDSN, err := setupTargetDatabase(config, targetContainerID)
 	if err != nil {
-		log.Panicln(err)
+		log.Println(err)
+
+		return false, ErrInvalidModel
 	}
 
 	diff, err := internal.Migra(migrateDSN, targetDSN)
 	if err != nil {
-		log.Panicln(err)
+		log.Println(err)
+
+		return false, ErrInvalidModel
 	}
 
 	// Filter stuff from go-migrate that doesn't exist in the target db, and we don't have and need anyway
@@ -298,23 +315,23 @@ func updateDiff(config *internal.Config, newMigrationFilePath string, initial bo
 		0o644,
 	)
 	if err != nil {
-		log.Panicln(err)
+		return false, fmt.Errorf("failed to write migration file: %w", err)
 	}
 
 	log.Println("Wrote migration file")
 
-	return true
+	return true, nil
 }
 
 func setupMigrateDatabase(config *internal.Config, newMigrationFilePath, migrateContainerID string) (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("Failed to get working directory: %v\n", err)
+		return "", fmt.Errorf("failed to get working directory: %w", err)
 	}
 
 	targetIP, err := setupDatabase(migrateContainerID, config)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to setup database: %w", err)
 	}
 
 	if _, err = os.Stat(newMigrationFilePath); err == nil {
@@ -340,7 +357,7 @@ func setupMigrateDatabase(config *internal.Config, newMigrationFilePath, migrate
 func setupTargetDatabase(config *internal.Config, targetContainerID string) (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("Failed to get working directory: %v\n", err)
+		return "", fmt.Errorf("failed to get working directory: %w", err)
 	}
 
 	targetIP, err := setupDatabase(targetContainerID, config)
