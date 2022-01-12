@@ -169,7 +169,7 @@ func getNewMigrationFilePath(migrationName string) (path string, migrationNumber
 		return "", 0, fmt.Errorf("failed to inspect migrations directory: %w", err)
 	}
 
-	var newMigrationFileName string
+	var migrationsNumber uint
 	if _, err = os.Stat(
 		filepath.Join(wd, "migrations", getMigrationFileName(migrationsCount, migrationName)),
 	); err == nil {
@@ -180,14 +180,15 @@ func getNewMigrationFilePath(migrationName string) (path string, migrationNumber
 			Default:   "y",
 		}
 		if _, err = prompt.Run(); err == nil {
-			newMigrationFileName = getMigrationFileName(migrationsCount, migrationName)
+			migrationsNumber = migrationsCount
+		} else {
+			migrationsNumber = migrationsCount + 1
 		}
-	}
-	if newMigrationFileName == "" {
-		newMigrationFileName = getMigrationFileName(migrationsCount+1, migrationName)
+	} else {
+		migrationsNumber = migrationsCount + 1
 	}
 
-	return filepath.Join(wd, "migrations", newMigrationFileName), migrationsCount + 1, nil
+	return filepath.Join(wd, "migrations", getMigrationFileName(migrationsNumber, migrationName)), migrationsNumber, nil
 }
 
 func getMigrationFileName(migrationNumber uint, migrationName string) string {
