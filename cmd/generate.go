@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
+	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
 	"github.com/thecodeteam/goodbye"
 
@@ -167,10 +168,30 @@ func getNewMigrationFilePath(migrationName string) (path string, migrationNumber
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to inspect migrations directory: %w", err)
 	}
-	var newMigrationFileName = fmt.Sprintf("%03d_%s.up.sql", migrationsCount+1, migrationName)
-	var newMigrationFilePath = filepath.Join(wd, "migrations", newMigrationFileName)
 
-	return newMigrationFilePath, migrationsCount + 1, nil
+	var newMigrationFileName string
+	if _, err = os.Stat(
+		filepath.Join(wd, "migrations", getMigrationFileName(migrationsCount, migrationName)),
+	); err == nil {
+		prompt := promptui.Prompt{
+			//nolint:lll
+			Label:     "The previous migration has the same name. Overwrite the previous migration instead of creating a new one",
+			IsConfirm: true,
+			Default:   "y",
+		}
+		if _, err = prompt.Run(); err == nil {
+			newMigrationFileName = getMigrationFileName(migrationsCount, migrationName)
+		}
+	}
+	if newMigrationFileName == "" {
+		newMigrationFileName = getMigrationFileName(migrationsCount+1, migrationName)
+	}
+
+	return filepath.Join(wd, "migrations", newMigrationFileName), migrationsCount + 1, nil
+}
+
+func getMigrationFileName(migrationNumber uint, migrationName string) string {
+	return fmt.Sprintf("%03d_%s.up.sql", migrationNumber, migrationName)
 }
 
 var (
