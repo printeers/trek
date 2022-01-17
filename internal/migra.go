@@ -14,7 +14,7 @@ func Migra(from, to string) (string, error) {
 	cmdMigra.Stderr = os.Stderr
 	output, err := cmdMigra.Output()
 	if err != nil && cmdMigra.ProcessState.ExitCode() != 2 {
-		return "", fmt.Errorf("failed to run migra: %w", err)
+		return "", fmt.Errorf("failed to run migra: %w %v", err, output)
 	}
 
 	return strings.TrimSuffix(string(output), "\n"), nil

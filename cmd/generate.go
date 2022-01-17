@@ -231,6 +231,7 @@ func updateDiff(config *internal.Config, newMigrationFilePath string, initial bo
 	if mStr == "" || mStr == modelContent {
 		return false, nil
 	}
+	log.Println("Generating migration file")
 	modelContent = mStr
 
 	targetContainerID, err = internal.DockerRunPostgresContainer()

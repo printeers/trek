@@ -57,7 +57,6 @@ func PsqlWaitDatabaseUp(ip, user, password, sslmode string) {
 			break
 		} else {
 			count++
-			log.Printf("Waiting for %s\n", ip)
 			time.Sleep(time.Second)
 		}
 	}
@@ -79,11 +78,10 @@ func PsqlCommand(ip, user, password, sslmode, database, command string) error {
 	)
 	cmdPsql.Env = getEnv(password, sslmode)
 	cmdPsql.Stderr = os.Stderr
-	cmdPsql.Stdout = os.Stdout
 
-	err := cmdPsql.Run()
+	out, err := cmdPsql.Output()
 	if err != nil {
-		return fmt.Errorf("failed to run psql: %w", err)
+		return fmt.Errorf("failed to run psql: %w %v", err, out)
 	}
 
 	return nil
@@ -105,11 +103,10 @@ func PsqlFile(ip, user, password, sslmode, database, file string) error {
 	)
 	cmdPsql.Env = getEnv(password, sslmode)
 	cmdPsql.Stderr = os.Stderr
-	cmdPsql.Stdout = os.Stdout
 
-	err := cmdPsql.Run()
+	out, err := cmdPsql.Output()
 	if err != nil {
-		return fmt.Errorf("failed to run psql: %w", err)
+		return fmt.Errorf("failed to run psql: %w %v", err, out)
 	}
 
 	return nil
