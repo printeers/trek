@@ -33,7 +33,7 @@ func DockerGetContainerIP(containerID string) (string, error) {
 	cmdDocker.Stderr = os.Stderr
 	output, err := cmdDocker.Output()
 	if err != nil {
-		return "", fmt.Errorf("failed to get container IP: %w %v", err, output)
+		return "", fmt.Errorf("failed to get container IP: %w %v", err, string(output))
 	}
 
 	return strings.TrimSuffix(string(output), "\n"), nil

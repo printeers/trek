@@ -25,7 +25,7 @@ func PgModelerExportToFile(input, output string) error {
 
 	out, err := cmdPgModeler.Output()
 	if err != nil {
-		return fmt.Errorf("failed to run pgmodeler: %w %v", err, out)
+		return fmt.Errorf("failed to run pgmodeler: %w %v", err, string(out))
 	}
 
 	return nil
@@ -50,7 +50,7 @@ func PgModelerExportToPng(input, output string) error {
 
 	out, err := cmdPgModeler.Output()
 	if err != nil {
-		return fmt.Errorf("failed to run pgmodeler: %w %v", err, out)
+		return fmt.Errorf("failed to run pgmodeler: %w %v", err, string(out))
 	}
 
 	return nil
