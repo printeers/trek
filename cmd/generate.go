@@ -1,12 +1,12 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -16,8 +16,6 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
-	"github.com/thecodeteam/goodbye"
-
 	"github.com/stack11/trek/internal"
 )
 
@@ -83,13 +81,7 @@ var generateCmd = &cobra.Command{
 			log.Fatalf("Failed to get new migration file path: %v\n", err)
 		}
 
-		ctx := context.Background()
-		defer goodbye.Exit(ctx, -1)
-		goodbye.Notify(ctx)
-		goodbye.Register(func(ctx context.Context, sig os.Signal) {
-			internal.DockerKillContainer(targetContainerID)
-			internal.DockerKillContainer(migrateContainerID)
-
+		defer func() {
 			if flagDev && flagCleanup {
 				if _, err = os.Stat(newMigrationFilePath); err == nil {
 					err = os.Remove(newMigrationFilePath)
@@ -98,30 +90,222 @@ var generateCmd = &cobra.Command{
 					}
 				}
 			}
-		})
+		}()
 
-		run(config, newMigrationFilePath, migrationNumber)
+		err = run(config, newMigrationFilePath, migrationNumber)
+		if err != nil {
+			log.Fatalf("Failed to run: %v\n", err)
+		}
 
 		if flagDev {
 			for {
 				time.Sleep(time.Millisecond * 100)
-				run(config, newMigrationFilePath, migrationNumber)
+				err = run(config, newMigrationFilePath, migrationNumber)
+				if err != nil {
+					log.Fatalf("Failed to run: %v\n", err)
+				}
 			}
 		}
 	},
 }
 
-func run(config *internal.Config, newMigrationFilePath string, migrationNumber uint) {
-	updated, err := updateDiff(config, newMigrationFilePath, migrationNumber == 1)
-	if err != nil && !errors.Is(err, ErrInvalidModel) {
-		log.Fatalf("Failed to generate diff: %v\n", err)
+type PostgresFunction = func(targetContainerID, migrateContainerID string) error
+
+func run(
+	config *internal.Config,
+	newMigrationFilePath string,
+	migrationNumber uint,
+) error {
+	targetContainerID, err := internal.DockerRunPostgresContainer()
+	if err != nil {
+		return fmt.Errorf("failed to create target container: %w", err)
 	}
+	migrateContainerID, err := internal.DockerRunPostgresContainer()
+	if err != nil {
+		return fmt.Errorf("failed to create migrate container: %w", err)
+	}
+
+	defer func() {
+		internal.DockerKillContainer(targetContainerID)
+		internal.DockerKillContainer(migrateContainerID)
+	}()
+
+	updated, err := generateMigrationFile(
+		config,
+		newMigrationFilePath,
+		migrationNumber == 1,
+		targetContainerID,
+		migrateContainerID,
+	)
+	if err != nil && !errors.Is(err, ErrInvalidModel) {
+		return fmt.Errorf("failed to generate migration file: %w", err)
+	}
+
 	if updated {
+		log.Println("Wrote migration file")
+
 		err = writeTemplateFiles(config, migrationNumber)
 		if err != nil {
-			log.Fatalf("Failed to write template files: %v\n", err)
+			return fmt.Errorf("failed to write template files: %w", err)
+		}
+
+		updated, err = generateDiffLockFile(config, newMigrationFilePath, targetContainerID, migrateContainerID)
+		if err != nil {
+			return fmt.Errorf("failed to generate diff lock file: %w", err)
+		}
+
+		if updated {
+			log.Println("Wrote diff lock file")
 		}
 	}
+
+	return nil
+}
+
+func generateDiffLockFile(
+	config *internal.Config,
+	newMigrationFilePath,
+	targetContainerID,
+	migrateContainerID string,
+) (bool, error) {
+	migrateIP, err := internal.DockerGetContainerIP(migrateContainerID)
+	if err != nil {
+		//nolint:wrapcheck
+		return false, err
+	}
+
+	err = internal.PsqlFile(
+		migrateIP,
+		internal.PGDefaultUsername,
+		internal.PGDefaultPassword,
+		"disable",
+		config.DatabaseName,
+		newMigrationFilePath,
+	)
+	if err != nil {
+		return false, fmt.Errorf("failed to apply generated migration: %w", err)
+	}
+
+	var diff string
+	diff, err = diffSchemaDumps(config, targetContainerID, migrateContainerID)
+	if err != nil {
+		return false, fmt.Errorf("failed to diff schema dumps: %w", err)
+	}
+
+	var wd string
+	wd, err = os.Getwd()
+	if err != nil {
+		return false, fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	lockfile := filepath.Join(wd, "diff.lock")
+	hasStoredDiff := false
+	var storedDiff string
+
+	if _, err = os.Stat(lockfile); err == nil {
+		hasStoredDiff = true
+		var s []byte
+		s, err = os.ReadFile(lockfile)
+		if err != nil {
+			return false, fmt.Errorf("failed to read diff.lock file: %w", err)
+		}
+		storedDiff = string(s)
+	}
+
+	if !hasStoredDiff || diff != storedDiff {
+		err = os.WriteFile(lockfile, []byte(diff), 0o600)
+		if err != nil {
+			return false, fmt.Errorf("failed to write diff.lock file: %w", err)
+		}
+
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func diffSchemaDumps(config *internal.Config, targetContainerID, migrateContainerID string) (string, error) {
+	targetIP, err := internal.DockerGetContainerIP(targetContainerID)
+	if err != nil {
+		//nolint:wrapcheck
+		return "", err
+	}
+
+	migrateIP, err := internal.DockerGetContainerIP(migrateContainerID)
+	if err != nil {
+		//nolint:wrapcheck
+		return "", err
+	}
+
+	pgDumpOptions := []string{
+		"--schema-only",
+		"--exclude-table=public.schema_migrations",
+	}
+
+	targetDump, err := internal.PgDump(targetIP,
+		internal.PGDefaultUsername,
+		internal.PGDefaultPassword,
+		"disable",
+		config.DatabaseName,
+		pgDumpOptions,
+	)
+	if err != nil {
+		//nolint:wrapcheck
+		return "", err
+	}
+
+	migrateDump, err := internal.PgDump(migrateIP,
+		internal.PGDefaultUsername,
+		internal.PGDefaultPassword,
+		"disable",
+		config.DatabaseName,
+		pgDumpOptions,
+	)
+	if err != nil {
+		//nolint:wrapcheck
+		return "", err
+	}
+
+	targetDumpFile := "/tmp/target.sql"
+	err = os.WriteFile(targetDumpFile, []byte(cleanDump(targetDump)), 0o600)
+	if err != nil {
+		return "", fmt.Errorf("failed to write target.sql file: %w", err)
+	}
+
+	migrateDumpFile := "/tmp/migrate.sql"
+	err = os.WriteFile(migrateDumpFile, []byte(cleanDump(migrateDump)), 0o600)
+	if err != nil {
+		return "", fmt.Errorf("failed to write migrate.sql file: %w", err)
+	}
+
+	gitDiffCmd := exec.Command(
+		"git",
+		"diff",
+		migrateDumpFile,
+		targetDumpFile,
+	)
+	gitDiffCmd.Stderr = os.Stderr
+
+	output, err := gitDiffCmd.Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if !(errors.As(err, &ee) && ee.ExitCode() <= 1) {
+			return "", fmt.Errorf("failed to run git diff: %w %v", err, string(output))
+		}
+	}
+
+	return string(output), nil
+}
+
+func cleanDump(dump string) string {
+	var lines []string
+	for _, line := range strings.Split(dump, "\n") {
+		if line != "" && !strings.HasPrefix(line, "--") {
+			lines = append(lines, line)
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func writeTemplateFiles(config *internal.Config, newVersion uint) error {
@@ -198,10 +382,6 @@ func getMigrationFileName(migrationNumber uint, migrationName string) string {
 var (
 	//nolint:gochecknoglobals
 	modelContent = ""
-	//nolint:gochecknoglobals
-	targetContainerID = ""
-	//nolint:gochecknoglobals
-	migrateContainerID = ""
 )
 
 func exportToPng(config *internal.Config, wd string) {
@@ -217,7 +397,13 @@ func exportToPng(config *internal.Config, wd string) {
 var ErrInvalidModel = errors.New("invalid model")
 
 //nolint:cyclop
-func updateDiff(config *internal.Config, newMigrationFilePath string, initial bool) (updated bool, err error) {
+func generateMigrationFile(
+	config *internal.Config,
+	newMigrationFilePath string,
+	initial bool,
+	targetContainerID,
+	migrateContainerID string,
+) (updated bool, err error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return false, fmt.Errorf("failed to get working directory: %w", err)
@@ -233,20 +419,6 @@ func updateDiff(config *internal.Config, newMigrationFilePath string, initial bo
 	}
 	log.Println("Generating migration file")
 	modelContent = mStr
-
-	targetContainerID, err = internal.DockerRunPostgresContainer()
-	if err != nil {
-		return false, fmt.Errorf("failed to create target container: %w", err)
-	}
-	migrateContainerID, err = internal.DockerRunPostgresContainer()
-	if err != nil {
-		return false, fmt.Errorf("failed to create migrate container: %w", err)
-	}
-
-	defer func() {
-		internal.DockerKillContainer(targetContainerID)
-		internal.DockerKillContainer(migrateContainerID)
-	}()
 
 	go exportToPng(config, wd)
 
@@ -267,6 +439,10 @@ func updateDiff(config *internal.Config, newMigrationFilePath string, initial bo
 			log.Println(err)
 
 			return false, ErrInvalidModel
+		}
+		_, err = setupDatabase(migrateContainerID, config)
+		if err != nil {
+			return false, fmt.Errorf("failed to setup database: %w", err)
 		}
 
 		// If we are developing the schema initially, there will be no diffs,
@@ -340,8 +516,6 @@ func updateDiff(config *internal.Config, newMigrationFilePath string, initial bo
 	if err != nil {
 		return false, fmt.Errorf("failed to write migration file: %w", err)
 	}
-
-	log.Println("Wrote migration file")
 
 	return true, nil
 }

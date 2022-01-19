@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -12,8 +11,6 @@ import (
 
 	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
-	"github.com/thecodeteam/goodbye"
-
 	"github.com/stack11/trek/internal"
 	"github.com/stack11/trek/internal/embed"
 )
@@ -141,20 +138,15 @@ var initCmd = &cobra.Command{
 			log.Fatalf("Failed to read config: %v\n", err)
 		}
 
-		ctx := context.Background()
-		defer goodbye.Exit(ctx, -1)
-		goodbye.Notify(ctx)
-		goodbye.Register(func(ctx context.Context, sig os.Signal) {
-			internal.DockerKillContainer(targetContainerID)
-			internal.DockerKillContainer(migrateContainerID)
-		})
-
-		wd, err := os.Getwd()
-		if err != nil {
-			log.Fatalf("Failed to get working directory: %v\n", err)
+		wd, wdErr := os.Getwd()
+		if wdErr != nil {
+			log.Fatalf("Failed to get working directory: %v\n", wdErr)
 		}
 
-		run(config, filepath.Join(wd, "migrations", "001_init.up.sql"), 1)
+		err = run(config, filepath.Join(wd, "migrations", "001_init.up.sql"), 1)
+		if err != nil {
+			log.Fatalln(err)
+		}
 	},
 }
 

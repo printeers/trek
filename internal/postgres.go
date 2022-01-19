@@ -112,6 +112,30 @@ func PsqlFile(ip, user, password, sslmode, database, file string) error {
 	return nil
 }
 
+func PgDump(ip, user, password, sslmode, database string, args []string) (string, error) {
+	cmd := []string{
+		"pg_dump",
+		"--user",
+		user,
+		"--host",
+		ip,
+	}
+	cmd = append(cmd, args...)
+	cmd = append(cmd, database)
+
+	//nolint:gosec
+	cmdPgDump := exec.Command(cmd[0], cmd[1:]...)
+	cmdPgDump.Env = getEnv(password, sslmode)
+	cmdPgDump.Stderr = os.Stderr
+
+	stdout, err := cmdPgDump.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to run pg_dump: %w", err)
+	}
+
+	return string(stdout), nil
+}
+
 func PsqlHelperSetupDatabaseAndUsers(ip, user, password, sslmode, database string, users []string) error {
 	err := PsqlCommand(ip, user, password, sslmode, PGDefaultDatabase, fmt.Sprintf("CREATE DATABASE %q;", database))
 	if err != nil {
