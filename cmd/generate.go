@@ -24,6 +24,8 @@ var (
 	flagDev bool
 	//nolint:gochecknoglobals
 	flagCleanup bool
+	//nolint:gochecknoglobals
+	flagOverwriteYes bool
 )
 
 const (
@@ -43,6 +45,12 @@ func init() {
 		"cleanup",
 		true,
 		"Remove the generated migrations file. Only works with --dev",
+	)
+	generateCmd.Flags().BoolVar(
+		&flagOverwriteYes,
+		"overwrite-yes",
+		false,
+		"Overwrite existing files",
 	)
 }
 
@@ -357,16 +365,20 @@ func getNewMigrationFilePath(migrationName string) (path string, migrationNumber
 	if _, err = os.Stat(
 		filepath.Join(wd, "migrations", getMigrationFileName(migrationsCount, migrationName)),
 	); err == nil {
-		prompt := promptui.Prompt{
-			//nolint:lll
-			Label:     "The previous migration has the same name. Overwrite the previous migration instead of creating a new one",
-			IsConfirm: true,
-			Default:   "y",
-		}
-		if _, err = prompt.Run(); err == nil {
+		if flagOverwriteYes {
 			migrationsNumber = migrationsCount
 		} else {
-			migrationsNumber = migrationsCount + 1
+			prompt := promptui.Prompt{
+				//nolint:lll
+				Label:     "The previous migration has the same name. Overwrite the previous migration instead of creating a new one",
+				IsConfirm: true,
+				Default:   "y",
+			}
+			if _, err = prompt.Run(); err == nil {
+				migrationsNumber = migrationsCount
+			} else {
+				migrationsNumber = migrationsCount + 1
+			}
 		}
 	} else {
 		migrationsNumber = migrationsCount + 1
