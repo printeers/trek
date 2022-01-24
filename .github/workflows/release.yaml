@@ -16,6 +16,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
+      - name: Build migra
+        run: ./migra/build.sh
+
       - name: Log in to the Container registry
         uses: docker/login-action@v1
         with:
@@ -29,12 +32,6 @@ jobs:
         with:
           images: ghcr.io/stack11/trek
 
-      - name: Extract migra metadata for Docker
-        id: migra_meta
-        uses: docker/metadata-action@v3
-        with:
-          images: ghcr.io/stack11/trek/migra
-
       - name: Build and push trek Docker image
         uses: docker/build-push-action@v2
         with:
@@ -42,11 +39,3 @@ jobs:
           pull: true
           push: true
           tags: ${{ steps.trek_meta.outputs.tags }}
-
-      - name: Build and push migra Docker image
-        uses: docker/build-push-action@v2
-        with:
-          file: Dockerfile.migra
-          pull: true
-          push: true
-          tags: ${{ steps.migra_meta.outputs.tags }}

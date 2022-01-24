@@ -2,6 +2,8 @@ name: Check golangci lint and publish docker images on main branch
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 permissions:
@@ -14,17 +16,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - run: touch internal/embed/bin/migra
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v2
         with:
           version: v1.43.0
   build-and-push-images:
     needs: golangci
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
+
+      - name: Build migra
+        run: ./migra/build.sh
 
       - name: Log in to the Container registry
         uses: docker/login-action@v1
@@ -38,13 +43,5 @@ jobs:
         with:
           context: .
           pull: true
-          push: true
+          push: ${{ github.ref == 'refs/heads/main' }}
           tags: ghcr.io/stack11/trek:latest
-
-      - name: Build and push migra Docker image
-        uses: docker/build-push-action@v2
-        with:
-          file: Dockerfile.migra
-          pull: true
-          push: true
-          tags: ghcr.io/stack11/trek/migra:latest
