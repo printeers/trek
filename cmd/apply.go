@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,6 +15,7 @@ import (
 	// needed driver.
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/jackc/pgx/v4"
 	"github.com/spf13/cobra"
 
 	"github.com/stack11/trek/internal"
@@ -24,8 +26,6 @@ var applyCmd = &cobra.Command{
 	Use:   "apply",
 	Short: "Apply the migrations to a running database",
 	Run: func(cmd *cobra.Command, args []string) {
-		internal.AssertApplyToolsAvailable()
-
 		config, err := internal.ReadConfig()
 		if err != nil {
 			log.Fatalf("Failed to read config: %v\n", err)
@@ -37,51 +37,84 @@ var applyCmd = &cobra.Command{
 		}
 
 		pgHost := os.Getenv("PGHOST")
+		pgPort := os.Getenv("PGPORT")
 		pgUser := os.Getenv("PGUSER")
 		pgPassword := os.Getenv("PGPASSWORD")
 		resetDB := os.Getenv("RESET_DB") == "true"
 		insertTestData := os.Getenv("INSERT_TEST_DATA") == "true"
 		sslMode := internal.GetSSLMode()
-		migrateDSN := fmt.Sprintf(
-			"postgres://%s:%s@%s:5432/%s?sslmode=%s",
+		conn, err := pgx.Connect(context.Background(), fmt.Sprintf(
+			"postgres://%s:%s@%s:%s/%s?sslmode=%s",
 			pgUser,
 			pgPassword,
 			pgHost,
-			config.DatabaseName,
+			pgPort,
+			"postgres", // We need to connect to the default database in order to drop and create the actual database
 			sslMode,
-		)
-
-		internal.PsqlWaitDatabaseUp(pgHost, pgUser, pgPassword, sslMode)
+		))
+		if err != nil {
+			log.Fatalf("Unable to connect to database: %v", err)
+		}
 
 		if resetDB {
-			// Pass empty user list so the roles don't get dropped
-			err = internal.PsqlHelperSetupDatabaseAndUsersDrop(
-				pgHost,
-				pgUser,
-				pgPassword,
-				sslMode,
-				config.DatabaseName,
-				[]string{},
+			log.Println("Resetting database")
+			_, err = conn.Exec(
+				context.Background(),
+				fmt.Sprintf("DROP DATABASE IF EXISTS %q WITH (FORCE)", config.DatabaseName),
 			)
 			if err != nil {
-				log.Println(err)
+				log.Fatalf("Failed to drop database: %v", err)
+			}
+			_, err = conn.Exec(
+				context.Background(),
+				fmt.Sprintf("DROP TABLE IF EXISTS %q", "schema_migrations"),
+			)
+			if err != nil {
+				log.Fatalf("Failed to drop table: %v", err)
 			}
 		}
 
-		// It will fail on roles that already exist, but that can be ignored
-		err = internal.PsqlHelperSetupDatabaseAndUsers(
-			pgHost,
-			pgUser,
-			pgPassword,
-			sslMode,
-			config.DatabaseName,
-			config.DatabaseUsers,
-		)
+		databaseExists, err := internal.CheckDatabaseExists(conn, config.DatabaseName)
 		if err != nil {
-			log.Println(err)
+			log.Fatalf("Failed to check if database exists: %v", err)
+		}
+		if !databaseExists {
+			_, err = conn.Exec(context.Background(), fmt.Sprintf("CREATE DATABASE %q;", config.DatabaseName))
+			if err != nil {
+				log.Fatalf("Failed to create database: %v", err)
+			}
 		}
 
-		m, err := migrate.New(fmt.Sprintf("file://%s", filepath.Join(wd, "migrations")), migrateDSN)
+		for _, u := range config.DatabaseUsers {
+			var userExists bool
+			userExists, err = internal.CheckUserExists(conn, u)
+			if err != nil {
+				log.Fatalf("Failed to check if user exists: %v", err)
+			}
+			if !userExists {
+				_, err = conn.Exec(context.Background(), fmt.Sprintf("CREATE ROLE %q WITH LOGIN;", u))
+				if err != nil {
+					log.Fatalf("Failed to create user: %v", err)
+				}
+			}
+		}
+
+		err = conn.Close(context.Background())
+		if err != nil {
+			log.Fatalf("Failed to close connection: %v", err)
+		}
+
+		dsn := fmt.Sprintf(
+			"postgres://%s:%s@%s:%s/%s?sslmode=%s",
+			pgUser,
+			pgPassword,
+			pgHost,
+			pgPort,
+			config.DatabaseName,
+			sslMode,
+		)
+
+		m, err := migrate.New(fmt.Sprintf("file://%s", filepath.Join(wd, "migrations")), dsn)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -106,7 +139,9 @@ var applyCmd = &cobra.Command{
 						if strings.HasPrefix(path.Base(p), fmt.Sprintf("%03d", index+1)) {
 							log.Printf("Inserting test data %s\n", path.Base(p))
 
-							err := internal.PsqlFile(pgHost, pgUser, pgPassword, sslMode, config.DatabaseName, p)
+							// We have to use psql, because users might use commands like "\copy"
+							// which don't work by directly connecting to the database
+							err := internal.PsqlFile(dsn, p)
 							if err != nil {
 								return fmt.Errorf("failed to apply test data: %w", err)
 							}
@@ -129,6 +164,7 @@ var applyCmd = &cobra.Command{
 				log.Fatalln(err)
 			}
 		}
+
 		log.Println("Successfully migrated database")
 	},
 }

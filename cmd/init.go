@@ -131,8 +131,6 @@ var initCmd = &cobra.Command{
 
 		log.Println("New project created!")
 
-		internal.AssertGenerateToolsAvailable()
-
 		config, err := internal.ReadConfig()
 		if err != nil {
 			log.Fatalf("Failed to read config: %v\n", err)

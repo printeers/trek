@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,8 +15,10 @@ import (
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
+	"github.com/jackc/pgx/v4"
 	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
+
 	"github.com/stack11/trek/internal"
 )
 
@@ -76,8 +79,6 @@ var generateCmd = &cobra.Command{
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		internal.AssertGenerateToolsAvailable()
-
 		config, err := internal.ReadConfig()
 		if err != nil {
 			log.Fatalf("Failed to read config: %v\n", err)
@@ -124,26 +125,40 @@ func run(
 	newMigrationFilePath string,
 	migrationNumber uint,
 ) error {
-	targetContainerID, err := internal.DockerRunPostgresContainer()
+	targetPostgres, targetDSN := internal.NewPostgresDatabase("/tmp/trek/target", 5432)
+	err := targetPostgres.Start()
 	if err != nil {
-		return fmt.Errorf("failed to create target container: %w", err)
+		return fmt.Errorf("failed to start target postgres database: %w", err)
 	}
-	migrateContainerID, err := internal.DockerRunPostgresContainer()
-	if err != nil {
-		return fmt.Errorf("failed to create migrate container: %w", err)
-	}
-
 	defer func() {
-		internal.DockerKillContainer(targetContainerID)
-		internal.DockerKillContainer(migrateContainerID)
+		_ = targetPostgres.Stop()
 	}()
+	targetConn, err := pgx.Connect(context.Background(), targetDSN)
+	if err != nil {
+		return fmt.Errorf("unable to connect to database: %w", err)
+	}
+	defer targetConn.Close(context.Background())
+
+	migratePostgres, migrateDSN := internal.NewPostgresDatabase("/tmp/trek/migrate", 5433)
+	err = migratePostgres.Start()
+	if err != nil {
+		return fmt.Errorf("failed to start migrate postgres database: %w", err)
+	}
+	defer func() {
+		_ = migratePostgres.Stop()
+	}()
+	migrateConn, err := pgx.Connect(context.Background(), migrateDSN)
+	if err != nil {
+		return fmt.Errorf("unable to connect to database: %w", err)
+	}
+	defer migrateConn.Close(context.Background())
 
 	updated, err := generateMigrationFile(
 		config,
 		newMigrationFilePath,
 		migrationNumber == 1,
-		targetContainerID,
-		migrateContainerID,
+		targetConn,
+		migrateConn,
 	)
 	if err != nil && !errors.Is(err, ErrInvalidModel) {
 		return fmt.Errorf("failed to generate migration file: %w", err)
@@ -157,7 +172,7 @@ func run(
 			return fmt.Errorf("failed to write template files: %w", err)
 		}
 
-		updated, err = generateDiffLockFile(config, newMigrationFilePath, targetContainerID, migrateContainerID)
+		updated, err = generateDiffLockFile(newMigrationFilePath, targetConn, migrateConn)
 		if err != nil {
 			return fmt.Errorf("failed to generate diff lock file: %w", err)
 		}
@@ -170,32 +185,18 @@ func run(
 	return nil
 }
 
-func generateDiffLockFile(
-	config *internal.Config,
-	newMigrationFilePath,
-	targetContainerID,
-	migrateContainerID string,
-) (bool, error) {
-	migrateIP, err := internal.DockerGetContainerIP(migrateContainerID)
+func generateDiffLockFile(newMigrationFilePath string, targetConn, migrateConn *pgx.Conn) (bool, error) {
+	newMigrationFileContent, err := os.ReadFile(newMigrationFilePath)
 	if err != nil {
-		//nolint:wrapcheck
-		return false, err
+		return false, fmt.Errorf("failed to read new migratio file: %w", err)
 	}
-
-	err = internal.PsqlFile(
-		migrateIP,
-		internal.PGDefaultUsername,
-		internal.PGDefaultPassword,
-		"disable",
-		config.DatabaseName,
-		newMigrationFilePath,
-	)
+	_, err = migrateConn.Exec(context.Background(), string(newMigrationFileContent))
 	if err != nil {
 		return false, fmt.Errorf("failed to apply generated migration: %w", err)
 	}
 
 	var diff string
-	diff, err = diffSchemaDumps(config, targetContainerID, migrateContainerID)
+	diff, err = diffSchemaDumps(targetConn, migrateConn)
 	if err != nil {
 		return false, fmt.Errorf("failed to diff schema dumps: %w", err)
 	}
@@ -232,43 +233,19 @@ func generateDiffLockFile(
 	return false, nil
 }
 
-func diffSchemaDumps(config *internal.Config, targetContainerID, migrateContainerID string) (string, error) {
-	targetIP, err := internal.DockerGetContainerIP(targetContainerID)
-	if err != nil {
-		//nolint:wrapcheck
-		return "", err
-	}
-
-	migrateIP, err := internal.DockerGetContainerIP(migrateContainerID)
-	if err != nil {
-		//nolint:wrapcheck
-		return "", err
-	}
-
+func diffSchemaDumps(targetConn, migrateConn *pgx.Conn) (string, error) {
 	pgDumpOptions := []string{
 		"--schema-only",
 		"--exclude-table=public.schema_migrations",
 	}
 
-	targetDump, err := internal.PgDump(targetIP,
-		internal.PGDefaultUsername,
-		internal.PGDefaultPassword,
-		"disable",
-		config.DatabaseName,
-		pgDumpOptions,
-	)
+	targetDump, err := internal.PgDump(internal.DSN(targetConn, "disable"), pgDumpOptions)
 	if err != nil {
 		//nolint:wrapcheck
 		return "", err
 	}
 
-	migrateDump, err := internal.PgDump(migrateIP,
-		internal.PGDefaultUsername,
-		internal.PGDefaultPassword,
-		"disable",
-		config.DatabaseName,
-		pgDumpOptions,
-	)
+	migrateDump, err := internal.PgDump(internal.DSN(migrateConn, "disable"), pgDumpOptions)
 	if err != nil {
 		//nolint:wrapcheck
 		return "", err
@@ -413,8 +390,8 @@ func generateMigrationFile(
 	config *internal.Config,
 	newMigrationFilePath string,
 	initial bool,
-	targetContainerID,
-	migrateContainerID string,
+	targetConn,
+	migrateConn *pgx.Conn,
 ) (updated bool, err error) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -446,15 +423,11 @@ func generateMigrationFile(
 
 	if initial {
 		// Verify the schema is correct by applying it to the database
-		_, err = setupTargetDatabase(config, targetContainerID)
+		err = executeTargetSQL(targetConn, config)
 		if err != nil {
 			log.Println(err)
 
 			return false, ErrInvalidModel
-		}
-		_, err = setupDatabase(migrateContainerID, config)
-		if err != nil {
-			return false, fmt.Errorf("failed to setup database: %w", err)
 		}
 
 		// If we are developing the schema initially, there will be no diffs,
@@ -474,19 +447,29 @@ func generateMigrationFile(
 		return true, nil
 	}
 
-	migrateDSN, err := setupMigrateDatabase(config, newMigrationFilePath, migrateContainerID)
+	err = internal.CreateUsers(migrateConn, config.DatabaseUsers)
 	if err != nil {
 		return false, fmt.Errorf("failed to setup migrate database: %w", err)
 	}
 
-	targetDSN, err := setupTargetDatabase(config, targetContainerID)
+	err = executeMigrateSQL(migrateConn, newMigrationFilePath)
+	if err != nil {
+		return false, fmt.Errorf("failed to execute migrate sql: %w", err)
+	}
+
+	err = internal.CreateUsers(targetConn, config.DatabaseUsers)
+	if err != nil {
+		return false, fmt.Errorf("failed to setup target database: %w", err)
+	}
+
+	err = executeTargetSQL(targetConn, config)
 	if err != nil {
 		log.Println(err)
 
 		return false, ErrInvalidModel
 	}
 
-	diff, err := internal.Migra(migrateDSN, targetDSN)
+	diff, err := internal.Migra(internal.DSN(migrateConn, "disable"), internal.DSN(targetConn, "disable"))
 	if err != nil {
 		log.Println(err)
 
@@ -532,83 +515,48 @@ func generateMigrationFile(
 	return true, nil
 }
 
-func setupMigrateDatabase(config *internal.Config, newMigrationFilePath, migrateContainerID string) (string, error) {
+func executeMigrateSQL(migrateConn *pgx.Conn, newMigrationFilePath string) error {
 	wd, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("failed to get working directory: %w", err)
-	}
-
-	targetIP, err := setupDatabase(migrateContainerID, config)
-	if err != nil {
-		return "", fmt.Errorf("failed to setup database: %w", err)
+		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
 	if _, err = os.Stat(newMigrationFilePath); err == nil {
 		err = os.Remove(newMigrationFilePath)
 		if err != nil {
-			return "", fmt.Errorf("failed to delete generated migration file: %w", err)
+			return fmt.Errorf("failed to delete generated migration file: %w", err)
 		}
 	}
 
-	migrateDSN := fmt.Sprintf("postgresql://postgres:postgres@%s:5432/%s?sslmode=disable", targetIP, config.DatabaseName)
-	m, err := migrate.New(fmt.Sprintf("file://%s", filepath.Join(wd, "migrations")), migrateDSN)
+	m, err := migrate.New(fmt.Sprintf("file://%s", filepath.Join(wd, "migrations")), internal.DSN(migrateConn, "disable"))
 	if err != nil {
-		return "", fmt.Errorf("failed to create migrate: %w", err)
+		return fmt.Errorf("failed to create migrate: %w", err)
 	}
 	err = m.Up()
 	if err != nil {
-		return "", fmt.Errorf("failed to up migrations: %w", err)
+		return fmt.Errorf("failed to up migrations: %w", err)
 	}
 
-	return migrateDSN, nil
+	return nil
 }
 
-func setupTargetDatabase(config *internal.Config, targetContainerID string) (string, error) {
+func executeTargetSQL(targetConn *pgx.Conn, config *internal.Config) error {
 	wd, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("failed to get working directory: %w", err)
+		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	targetIP, err := setupDatabase(targetContainerID, config)
+	targetSQL, err := os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)))
 	if err != nil {
-		return "", fmt.Errorf("failed to setup database: %w", err)
+		return fmt.Errorf("failed to read target sql: %w", err)
 	}
 
-	err = internal.PsqlFile(
-		targetIP,
-		internal.PGDefaultUsername,
-		internal.PGDefaultPassword,
-		"disable",
-		config.DatabaseName,
-		filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)),
-	)
+	_, err = targetConn.Exec(context.Background(), string(targetSQL))
 	if err != nil {
-		return "", fmt.Errorf("failed to apply model: %w", err)
+		return fmt.Errorf("failed to target sql: %w", err)
 	}
 
-	return fmt.Sprintf("postgresql://postgres:postgres@%s:5432/%s?sslmode=disable", targetIP, config.DatabaseName), nil
-}
-
-func setupDatabase(containerName string, config *internal.Config) (containerIP string, err error) {
-	ip, err := internal.DockerGetContainerIP(containerName)
-	if err != nil {
-		return "", fmt.Errorf("failed to get container IP: %w", err)
-	}
-
-	internal.PsqlWaitDatabaseUp(ip, internal.PGDefaultUsername, internal.PGDefaultPassword, "disable")
-	err = internal.PsqlHelperSetupDatabaseAndUsers(
-		ip,
-		internal.PGDefaultUsername,
-		internal.PGDefaultPassword,
-		"disable",
-		config.DatabaseName,
-		config.DatabaseUsers,
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to setup database: %w", err)
-	}
-
-	return ip, nil
+	return nil
 }
 
 func inspectMigrations(migrationsDir string) (migrationsCount uint, err error) {

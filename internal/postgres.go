@@ -1,131 +1,42 @@
 package internal
 
 import (
+	"bytes"
+	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
-	"time"
+
+	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
+	"github.com/jackc/pgx/v4"
 )
 
-const (
-	//nolint:gochecknoglobals
-	PGDefaultUsername = "postgres"
-	//nolint:gochecknoglobals
-	PGDefaultPassword = "postgres"
-	//nolint:gochecknoglobals
-	PGDefaultDatabase = "postgres"
-)
+func NewPostgresDatabase(runtimePath string, port uint32) (postgres *embeddedpostgres.EmbeddedPostgres, dsn string) {
+	var buf bytes.Buffer
 
-func getEnv(password, sslmode string) []string {
-	return append(
-		os.Environ(),
-		fmt.Sprintf("PGPASSWORD=%s", password),
-		fmt.Sprintf("PGSSLMODE=%s", sslmode),
-	)
+	return embeddedpostgres.NewDatabase(
+		embeddedpostgres.
+			DefaultConfig().
+			Logger(&buf).
+			Version(embeddedpostgres.V13).
+			RuntimePath(runtimePath).
+			Username("postgres").
+			Password("postgres").
+			Port(port).
+			Database("postgres"),
+	), fmt.Sprintf("postgres://postgres:postgres@127.0.0.1:%d/postgres", port)
 }
 
-func PsqlIsDatabaseUp(ip, user, password, sslmode string) (up bool, out []byte) {
-	cmdPsql := exec.Command(
-		"psql",
-		"--echo-errors",
-		"--variable",
-		"ON_ERROR_STOP=1",
-		"--user",
-		user,
-		"--host",
-		ip,
-		"--command",
-		"\\l",
-		PGDefaultDatabase,
-	)
-	cmdPsql.Env = getEnv(password, sslmode)
-	out, err := cmdPsql.CombinedOutput()
-
-	return err == nil, out
-}
-
-func PsqlWaitDatabaseUp(ip, user, password, sslmode string) {
-	var connected bool
-	var out []byte
-	count := 0
-	for {
-		if count == 10 {
-			log.Fatalf("Failed to connect to database: %s\n", string(out))
-		}
-		if connected, out = PsqlIsDatabaseUp(ip, user, password, sslmode); connected {
-			break
-		} else {
-			count++
-			time.Sleep(time.Second)
-		}
-	}
-}
-
-func PsqlCommand(ip, user, password, sslmode, database, command string) error {
-	cmdPsql := exec.Command(
-		"psql",
-		"--echo-errors",
-		"--variable",
-		"ON_ERROR_STOP=1",
-		"--user",
-		user,
-		"--host",
-		ip,
-		"--command",
-		command,
-		database,
-	)
-	cmdPsql.Env = getEnv(password, sslmode)
-	cmdPsql.Stderr = os.Stderr
-
-	out, err := cmdPsql.Output()
-	if err != nil {
-		return fmt.Errorf("failed to run psql: %w %v", err, string(out))
-	}
-
-	return nil
-}
-
-func PsqlFile(ip, user, password, sslmode, database, file string) error {
-	cmdPsql := exec.Command(
-		"psql",
-		"--echo-errors",
-		"--variable",
-		"ON_ERROR_STOP=1",
-		"--user",
-		user,
-		"--host",
-		ip,
-		"--file",
-		file,
-		database,
-	)
-	cmdPsql.Env = getEnv(password, sslmode)
-	cmdPsql.Stderr = os.Stderr
-
-	out, err := cmdPsql.Output()
-	if err != nil {
-		return fmt.Errorf("failed to run psql: %w %v", err, string(out))
-	}
-
-	return nil
-}
-
-func PgDump(ip, user, password, sslmode, database string, args []string) (string, error) {
+func PgDump(dsn string, args []string) (string, error) {
 	cmd := []string{
 		"pg_dump",
-		"--user",
-		user,
-		"--host",
-		ip,
+		"--dbname",
+		dsn,
 	}
 	cmd = append(cmd, args...)
-	cmd = append(cmd, database)
 
 	//nolint:gosec
 	cmdPgDump := exec.Command(cmd[0], cmd[1:]...)
-	cmdPgDump.Env = getEnv(password, sslmode)
 	cmdPgDump.Stderr = os.Stderr
 
 	stdout, err := cmdPgDump.Output()
@@ -136,39 +47,72 @@ func PgDump(ip, user, password, sslmode, database string, args []string) (string
 	return string(stdout), nil
 }
 
-func PsqlHelperSetupDatabaseAndUsers(ip, user, password, sslmode, database string, users []string) error {
-	err := PsqlCommand(ip, user, password, sslmode, PGDefaultDatabase, fmt.Sprintf("CREATE DATABASE %q;", database))
+func PsqlFile(dsn, file string) error {
+	cmdPsql := exec.Command(
+		"psql",
+		"--echo-errors",
+		"--variable",
+		"ON_ERROR_STOP=1",
+		"--dbname",
+		dsn,
+		"--file",
+		file,
+	)
+	cmdPsql.Stderr = os.Stderr
+
+	err := cmdPsql.Run()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to run psql: %w", err)
 	}
+
+	return nil
+}
+
+func CreateUsers(conn *pgx.Conn, users []string) error {
 	for _, u := range users {
-		err = PsqlCommand(ip, user, password, sslmode, PGDefaultDatabase, fmt.Sprintf("CREATE ROLE %q WITH LOGIN;", u))
+		_, err := conn.Exec(context.Background(), fmt.Sprintf("CREATE ROLE %q WITH LOGIN;", u))
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to create user: %w", err)
 		}
 	}
 
 	return nil
 }
 
-func PsqlHelperSetupDatabaseAndUsersDrop(ip, user, password, sslmode, database string, users []string) error {
-	err := PsqlCommand(
-		ip,
-		user,
-		password,
-		sslmode,
-		PGDefaultDatabase,
-		fmt.Sprintf("DROP DATABASE IF EXISTS %q WITH (FORCE)", database),
-	)
+func CheckDatabaseExists(conn *pgx.Conn, user string) (bool, error) {
+	a := conn.QueryRow(context.Background(), fmt.Sprintf("SELECT COUNT(*) FROM pg_database WHERE datname='%s';", user))
+
+	var b int64
+	err := a.Scan(&b)
 	if err != nil {
-		return err
-	}
-	for _, u := range users {
-		err = PsqlCommand(ip, user, password, sslmode, PGDefaultDatabase, fmt.Sprintf("DROP ROLE IF EXISTS %s", u))
-		if err != nil {
-			return err
-		}
+		return false, fmt.Errorf("failed to decode row: %w", err)
 	}
 
-	return nil
+	return b != 0, nil
+}
+
+func CheckUserExists(conn *pgx.Conn, user string) (bool, error) {
+	a := conn.QueryRow(context.Background(), fmt.Sprintf("SELECT COUNT(*) FROM pg_roles WHERE rolname='%s';", user))
+
+	var b int64
+	err := a.Scan(&b)
+	if err != nil {
+		return false, fmt.Errorf("failed to decode row: %w", err)
+	}
+
+	return b != 0, nil
+}
+
+func DSN(conn *pgx.Conn, sslmode string) string {
+	config := conn.Config()
+
+	return fmt.Sprintf(
+		"postgresql://%s:%s@%s:%d/%s?sslmode=%s",
+		config.User,
+		config.Password,
+		config.Host,
+		config.Port,
+		config.Database,
+		sslmode,
+	)
 }
