@@ -22,100 +22,88 @@ import (
 	"github.com/stack11/trek/internal"
 )
 
-var (
-	//nolint:gochecknoglobals
-	flagDev bool
-	//nolint:gochecknoglobals
-	flagCleanup bool
-	//nolint:gochecknoglobals
-	flagOverwriteYes bool
-)
-
 const (
 	regexpPartialLowerKebabCase = `[a-z][a-z0-9\-]*[a-z]`
 )
 
-//nolint:gochecknoinits
-func init() {
-	generateCmd.Flags().BoolVar(
-		&flagDev,
-		"dev",
-		false,
-		"Watch for file changes and automatically regenerate the migration file",
+//nolint:gocognit
+func NewGenerateCommand() *cobra.Command {
+	var (
+		dev       bool
+		cleanup   bool
+		overwrite bool
 	)
-	generateCmd.Flags().BoolVar(
-		&flagCleanup,
-		"cleanup",
-		true,
-		"Remove the generated migrations file. Only works with --dev",
-	)
-	generateCmd.Flags().BoolVar(
-		&flagOverwriteYes,
-		"overwrite-yes",
-		false,
-		"Overwrite existing files",
-	)
-}
 
-//nolint:gochecknoglobals
-var generateCmd = &cobra.Command{
-	Use:   "generate [migration-name]",
-	Short: "Generate the migrations for a pgModeler file",
-	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			//nolint:goerr113
-			return errors.New("pass the name of the migration")
-		} else if len(args) > 1 {
-			//nolint:goerr113
-			return errors.New("expecting one migration name, use lower-kebab-case for the migration name")
-		}
+	generateCmd := &cobra.Command{
+		Use:   "generate [migration-name]",
+		Short: "Generate the migrations for a pgModeler file",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			initializeConfig(cmd)
 
-		var regexpLowerKebabCase = regexp.MustCompile(`^` + regexpPartialLowerKebabCase + `$`)
-		if !regexpLowerKebabCase.MatchString(args[0]) {
-			//nolint:goerr113
-			return errors.New("migration name must be lower-kebab-case and must not start or end with a number or dash")
-		}
+			return nil
+		},
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				//nolint:goerr113
+				return errors.New("pass the name of the migration")
+			} else if len(args) > 1 {
+				//nolint:goerr113
+				return errors.New("expecting one migration name, use lower-kebab-case for the migration name")
+			}
 
-		return nil
-	},
-	Run: func(cmd *cobra.Command, args []string) {
-		config, err := internal.ReadConfig()
-		if err != nil {
-			log.Fatalf("Failed to read config: %v\n", err)
-		}
+			var regexpLowerKebabCase = regexp.MustCompile(`^` + regexpPartialLowerKebabCase + `$`)
+			if !regexpLowerKebabCase.MatchString(args[0]) {
+				//nolint:goerr113
+				return errors.New("migration name must be lower-kebab-case and must not start or end with a number or dash")
+			}
 
-		migrationName := args[0]
-		newMigrationFilePath, migrationNumber, err := getNewMigrationFilePath(migrationName)
-		if err != nil {
-			log.Fatalf("Failed to get new migration file path: %v\n", err)
-		}
+			return nil
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			config, err := internal.ReadConfig()
+			if err != nil {
+				log.Fatalf("Failed to read config: %v\n", err)
+			}
 
-		defer func() {
-			if flagDev && flagCleanup {
-				if _, err = os.Stat(newMigrationFilePath); err == nil {
-					err = os.Remove(newMigrationFilePath)
+			migrationName := args[0]
+			newMigrationFilePath, migrationNumber, err := getNewMigrationFilePath(migrationName, overwrite)
+			if err != nil {
+				log.Fatalf("Failed to get new migration file path: %v\n", err)
+			}
+
+			defer func() {
+				if dev && cleanup {
+					if _, err = os.Stat(newMigrationFilePath); err == nil {
+						err = os.Remove(newMigrationFilePath)
+						if err != nil {
+							log.Printf("failed to delete new migration file: %v\n", err)
+						}
+					}
+				}
+			}()
+
+			err = run(config, newMigrationFilePath, migrationNumber)
+			if err != nil {
+				log.Fatalf("Failed to run: %v\n", err)
+			}
+
+			if dev {
+				for {
+					time.Sleep(time.Millisecond * 100)
+					err = run(config, newMigrationFilePath, migrationNumber)
 					if err != nil {
-						log.Printf("failed to delete new migration file: %v\n", err)
+						log.Fatalf("Failed to run: %v\n", err)
 					}
 				}
 			}
-		}()
+		},
+	}
 
-		err = run(config, newMigrationFilePath, migrationNumber)
-		if err != nil {
-			log.Fatalf("Failed to run: %v\n", err)
-		}
+	generateCmd.Flags().BoolVar(&dev, "dev", false, "Watch for file changes and automatically regenerate the migration file") //nolint:lll
+	generateCmd.Flags().BoolVar(&cleanup, "cleanup", true, "Remove the generated migrations file. Only works with --dev")
+	generateCmd.Flags().BoolVar(&overwrite, "overwrite", false, "Overwrite existing files")
 
-		if flagDev {
-			for {
-				time.Sleep(time.Millisecond * 100)
-				err = run(config, newMigrationFilePath, migrationNumber)
-				if err != nil {
-					log.Fatalf("Failed to run: %v\n", err)
-				}
-			}
-		}
-	},
+	return generateCmd
 }
 
 type PostgresFunction = func(targetContainerID, migrateContainerID string) error
@@ -320,7 +308,7 @@ func writeTemplateFiles(config *internal.Config, newVersion uint) error {
 	return nil
 }
 
-func getNewMigrationFilePath(migrationName string) (path string, migrationNumber uint, err error) {
+func getNewMigrationFilePath(migrationName string, overwrite bool) (path string, migrationNumber uint, err error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to get working directory: %w", err)
@@ -342,7 +330,7 @@ func getNewMigrationFilePath(migrationName string) (path string, migrationNumber
 	if _, err = os.Stat(
 		filepath.Join(wd, "migrations", getMigrationFileName(migrationsCount, migrationName)),
 	); err == nil {
-		if flagOverwriteYes {
+		if overwrite {
 			migrationsNumber = migrationsCount
 		} else {
 			prompt := promptui.Prompt{

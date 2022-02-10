@@ -6,7 +6,7 @@ mkdir example
 cd example
 
 TREK_VERSION=latest \
-MODEL_NAME=foo \
-DATABASE_NAME=bar \
-DATABASE_USERS=alice,bob \
+TREK_MODEL_NAME=foo \
+TREK_DATABASE_NAME=bar \
+TREK_DATABASE_USERS=alice,bob \
 go run .. init
