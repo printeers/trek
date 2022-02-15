@@ -1,4 +1,6 @@
 #!/bin/bash
-set -e
-docker build -t ghcr.io/stack11/trek/migra:latest - < Dockerfile.migra
+set -euxo pipefail
+
+cd "$(dirname "$0")"
+
 docker build -t ghcr.io/stack11/trek:latest .

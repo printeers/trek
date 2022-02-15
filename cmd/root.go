@@ -1,24 +1,16 @@
 package cmd
 
-import (
-	"fmt"
-	"os"
+import "github.com/spf13/cobra"
 
-	"github.com/spf13/cobra"
-)
-
-//nolint:gochecknoglobals
-var rootCmd = &cobra.Command{
-	Use:   "trek",
-	Short: "A tool to do automatic database migrations created by Stack11",
-}
-
-func Execute() {
-	rootCmd.AddCommand(applyCmd)
-	rootCmd.AddCommand(generateCmd)
-	rootCmd.AddCommand(initCmd)
-	if err := rootCmd.Execute(); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+func NewRootCommand() *cobra.Command {
+	rootCmd := &cobra.Command{
+		Use:   "trek",
+		Short: "A tool to do automatic database migrations created by Stack11",
 	}
+
+	rootCmd.AddCommand(NewApplyCommand())
+	rootCmd.AddCommand(NewGenerateCommand())
+	rootCmd.AddCommand(NewInitCommand())
+
+	return rootCmd
 }

@@ -1,8 +1,8 @@
-FROM python:3.10-alpine as build
+FROM python:3.10-alpine
 
-RUN apk add git build-base libffi-dev
-#ENV CRYPTOGRAPHY_DONT_BUILD_RUST=1
-RUN pip install poetry pyinstaller psycopg2-binary
+RUN apk add git build-base libffi-dev scons patchelf
+ENV CRYPTOGRAPHY_DONT_BUILD_RUST=1
+RUN pip install poetry pyinstaller psycopg2-binary staticx
 
 WORKDIR /app
 
@@ -18,7 +18,6 @@ RUN git clone --depth=1 https://github.com/djrobstep/sqlbag && \
 RUN git clone --depth=1 https://github.com/djrobstep/migra && \
     cd migra && \
     printf "from migra.command import do_command\ndo_command()" > main.py && \
-    pyinstaller main.py --onefile --name migra --collect-data schemainspect
-
-FROM alpine
-COPY --from=build /app/migra/dist/migra /usr/local/bin/migra
+    pyinstaller main.py --onefile --name migra --collect-data schemainspect && \
+    mkdir /app/out && \
+    staticx dist/migra /app/out/migra
