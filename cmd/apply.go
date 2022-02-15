@@ -74,13 +74,6 @@ func NewApplyCommand() *cobra.Command {
 				if err != nil {
 					log.Fatalf("Failed to drop database: %v", err)
 				}
-				_, err = conn.Exec(
-					context.Background(),
-					fmt.Sprintf("DROP TABLE IF EXISTS %q", "schema_migrations"),
-				)
-				if err != nil {
-					log.Fatalf("Failed to drop table: %v", err)
-				}
 			}
 
 			databaseExists, err := internal.CheckDatabaseExists(conn, config.DatabaseName)
