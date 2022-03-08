@@ -14,6 +14,7 @@ import (
 	"text/template"
 	"time"
 
+	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/jackc/pgx/v4"
 	"github.com/manifoldco/promptui"
@@ -26,12 +27,13 @@ const (
 	regexpPartialLowerKebabCase = `[a-z][a-z0-9\-]*[a-z]`
 )
 
-//nolint:gocognit
+//nolint:gocognit,cyclop
 func NewGenerateCommand() *cobra.Command {
 	var (
 		dev       bool
 		cleanup   bool
 		overwrite bool
+		stdout    bool
 	)
 
 	generateCmd := &cobra.Command{
@@ -43,18 +45,25 @@ func NewGenerateCommand() *cobra.Command {
 			return nil
 		},
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				//nolint:goerr113
-				return errors.New("pass the name of the migration")
-			} else if len(args) > 1 {
-				//nolint:goerr113
-				return errors.New("expecting one migration name, use lower-kebab-case for the migration name")
-			}
+			if stdout {
+				if len(args) != 0 {
+					//nolint:goerr113
+					return errors.New("pass no name for stdout generation")
+				}
+			} else {
+				if len(args) == 0 {
+					//nolint:goerr113
+					return errors.New("pass the name of the migration")
+				} else if len(args) > 1 {
+					//nolint:goerr113
+					return errors.New("expecting one migration name, use lower-kebab-case for the migration name")
+				}
 
-			var regexpLowerKebabCase = regexp.MustCompile(`^` + regexpPartialLowerKebabCase + `$`)
-			if !regexpLowerKebabCase.MatchString(args[0]) {
-				//nolint:goerr113
-				return errors.New("migration name must be lower-kebab-case and must not start or end with a number or dash")
+				var regexpLowerKebabCase = regexp.MustCompile(`^` + regexpPartialLowerKebabCase + `$`)
+				if !regexpLowerKebabCase.MatchString(args[0]) {
+					//nolint:goerr113
+					return errors.New("migration name must be lower-kebab-case and must not start or end with a number or dash")
+				}
 			}
 
 			return nil
@@ -65,34 +74,61 @@ func NewGenerateCommand() *cobra.Command {
 				log.Fatalf("Failed to read config: %v\n", err)
 			}
 
-			migrationName := args[0]
-			newMigrationFilePath, migrationNumber, err := getNewMigrationFilePath(migrationName, overwrite)
-			if err != nil {
-				log.Fatalf("Failed to get new migration file path: %v\n", err)
-			}
+			var runnerFunc RunnerFunc
 
-			defer func() {
-				if dev && cleanup {
-					if _, err = os.Stat(newMigrationFilePath); err == nil {
-						err = os.Remove(newMigrationFilePath)
-						if err != nil {
-							log.Printf("failed to delete new migration file: %v\n", err)
+			if stdout {
+				var migrationsDir string
+				migrationsDir, err = getMigrationsDir()
+				if err != nil {
+					log.Fatalf("Failed to get migrations directory: %v", err)
+				}
+				var migrationsCount uint
+				migrationsCount, err = inspectMigrations(migrationsDir)
+				if err != nil {
+					log.Fatalf("Failed to inspect migrations directory: %v", err)
+				}
+
+				initial := migrationsCount == 0
+
+				runnerFunc = func() error {
+					return runWithStdout(config, initial)
+				}
+			} else {
+				migrationName := args[0]
+				var newMigrationFilePath string
+				var migrationNumber uint
+				newMigrationFilePath, migrationNumber, err = getNewMigrationFilePath(migrationName, overwrite)
+				if err != nil {
+					log.Fatalf("Failed to get new migration file path: %v\n", err)
+				}
+
+				defer func() {
+					if dev && cleanup {
+						if _, err = os.Stat(newMigrationFilePath); err == nil {
+							err = os.Remove(newMigrationFilePath)
+							if err != nil {
+								log.Printf("failed to delete new migration file: %v\n", err)
+							}
 						}
 					}
-				}
-			}()
+				}()
 
-			err = run(config, newMigrationFilePath, migrationNumber)
+				runnerFunc = func() error {
+					return runWithFile(config, newMigrationFilePath, migrationNumber)
+				}
+			}
+
+			err = runnerFunc()
 			if err != nil {
-				log.Fatalf("Failed to run: %v\n", err)
+				log.Printf("Failed to run: %v\n", err)
 			}
 
 			if dev {
 				for {
 					time.Sleep(time.Millisecond * 100)
-					err = run(config, newMigrationFilePath, migrationNumber)
+					err = runnerFunc()
 					if err != nil {
-						log.Fatalf("Failed to run: %v\n", err)
+						log.Printf("Failed to run: %v\n", err)
 					}
 				}
 			}
@@ -102,57 +138,116 @@ func NewGenerateCommand() *cobra.Command {
 	generateCmd.Flags().BoolVar(&dev, "dev", false, "Watch for file changes and automatically regenerate the migration file") //nolint:lll
 	generateCmd.Flags().BoolVar(&cleanup, "cleanup", true, "Remove the generated migrations file. Only works with --dev")
 	generateCmd.Flags().BoolVar(&overwrite, "overwrite", false, "Overwrite existing files")
+	generateCmd.Flags().BoolVar(&stdout, "stdout", false, "Output migration statements to stdout")
 
 	return generateCmd
 }
 
-type PostgresFunction = func(targetContainerID, migrateContainerID string) error
+func setupDatabase(name string, port uint32) (*embeddedpostgres.EmbeddedPostgres, *pgx.Conn) {
+	postgres, dsn := internal.NewPostgresDatabase(fmt.Sprintf("/tmp/trek/%s", name), port)
+	err := postgres.Start()
+	if err != nil {
+		log.Fatalf("Failed to start %s database: %v", name, err)
+	}
+	conn, err := pgx.Connect(context.Background(), dsn)
+	if err != nil {
+		log.Fatalf("Unable to connect to %s database: %v", name, err)
+	}
 
-func run(
+	return postgres, conn
+}
+
+type RunnerFunc = func() error
+
+func runWithStdout(
+	config *internal.Config,
+	initial bool,
+) error {
+	updated, err := checkIfUpdated(config)
+	if err != nil {
+		return fmt.Errorf("failed to check if model has been updated: %w", err)
+	}
+	if updated {
+		targetPostgres, targetConn := setupDatabase("target", 5432)
+		defer func() {
+			_ = targetConn.Close(context.Background())
+			_ = targetPostgres.Stop()
+		}()
+
+		migratePostgres, migrateConn := setupDatabase("migrate", 5433)
+		defer func() {
+			_ = migrateConn.Close(context.Background())
+			_ = migratePostgres.Stop()
+		}()
+
+		var statements string
+		statements, err = generateMigrationStatements(
+			config,
+			initial,
+			targetConn,
+			migrateConn,
+		)
+		if err != nil && !errors.Is(err, ErrInvalidModel) {
+			return fmt.Errorf("failed to generate migration statements: %w", err)
+		}
+		fmt.Println("")
+		fmt.Println("--")
+		fmt.Println(statements)
+		fmt.Println("--")
+	}
+
+	return nil
+}
+
+func runWithFile(
 	config *internal.Config,
 	newMigrationFilePath string,
 	migrationNumber uint,
 ) error {
-	targetPostgres, targetDSN := internal.NewPostgresDatabase("/tmp/trek/target", 5432)
-	err := targetPostgres.Start()
+	updated, err := checkIfUpdated(config)
 	if err != nil {
-		return fmt.Errorf("failed to start target postgres database: %w", err)
+		return fmt.Errorf("failed to check if model has been updated: %w", err)
 	}
-	defer func() {
-		_ = targetPostgres.Stop()
-	}()
-	targetConn, err := pgx.Connect(context.Background(), targetDSN)
-	if err != nil {
-		return fmt.Errorf("unable to connect to database: %w", err)
-	}
-	defer targetConn.Close(context.Background())
-
-	migratePostgres, migrateDSN := internal.NewPostgresDatabase("/tmp/trek/migrate", 5433)
-	err = migratePostgres.Start()
-	if err != nil {
-		return fmt.Errorf("failed to start migrate postgres database: %w", err)
-	}
-	defer func() {
-		_ = migratePostgres.Stop()
-	}()
-	migrateConn, err := pgx.Connect(context.Background(), migrateDSN)
-	if err != nil {
-		return fmt.Errorf("unable to connect to database: %w", err)
-	}
-	defer migrateConn.Close(context.Background())
-
-	updated, err := generateMigrationFile(
-		config,
-		newMigrationFilePath,
-		migrationNumber == 1,
-		targetConn,
-		migrateConn,
-	)
-	if err != nil && !errors.Is(err, ErrInvalidModel) {
-		return fmt.Errorf("failed to generate migration file: %w", err)
-	}
-
 	if updated {
+		if _, err = os.Stat(newMigrationFilePath); err == nil {
+			err = os.Remove(newMigrationFilePath)
+			if err != nil {
+				return fmt.Errorf("failed to delete generated migration file: %w", err)
+			}
+		}
+
+		targetPostgres, targetConn := setupDatabase("target", 5432)
+		defer func() {
+			_ = targetConn.Close(context.Background())
+			_ = targetPostgres.Stop()
+		}()
+
+		migratePostgres, migrateConn := setupDatabase("migrate", 5433)
+		defer func() {
+			_ = migrateConn.Close(context.Background())
+			_ = migratePostgres.Stop()
+		}()
+
+		var statements string
+		statements, err = generateMigrationStatements(
+			config,
+			migrationNumber == 1,
+			targetConn,
+			migrateConn,
+		)
+		if err != nil && !errors.Is(err, ErrInvalidModel) {
+			return fmt.Errorf("failed to generate migration statements: %w", err)
+		}
+
+		//nolint:gosec
+		err = os.WriteFile(
+			newMigrationFilePath,
+			[]byte(statements),
+			0o644,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to write migration file: %w", err)
+		}
 		log.Println("Wrote migration file")
 
 		err = writeTemplateFiles(config, migrationNumber)
@@ -171,6 +266,27 @@ func run(
 	}
 
 	return nil
+}
+
+func checkIfUpdated(config *internal.Config) (bool, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return false, fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	m, err := os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName)))
+	if err != nil {
+		return false, fmt.Errorf("failed to read model file: %w", err)
+	}
+	mStr := strings.TrimSuffix(string(m), "\n")
+	if mStr == "" || mStr == modelContent {
+		return false, nil
+	}
+	modelContent = mStr
+
+	log.Println("Changes detected")
+
+	return true, nil
 }
 
 func generateDiffLockFile(newMigrationFilePath string, targetConn, migrateConn *pgx.Conn) (bool, error) {
@@ -308,19 +424,31 @@ func writeTemplateFiles(config *internal.Config, newVersion uint) error {
 	return nil
 }
 
-func getNewMigrationFilePath(migrationName string, overwrite bool) (path string, migrationNumber uint, err error) {
+func getMigrationsDir() (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to get working directory: %w", err)
+		return "", fmt.Errorf("failed to get working directory: %w", err)
 	}
 	migrationsDir := filepath.Join(wd, "migrations")
 	if _, err = os.Stat(migrationsDir); os.IsNotExist(err) {
 		err = os.Mkdir(migrationsDir, 0o755)
 		if err != nil {
-			return "", 0, fmt.Errorf("failed to create migrations directory: %w", err)
+			return "", fmt.Errorf("failed to create migrations directory: %w", err)
 		}
 	}
 
+	return migrationsDir, nil
+}
+
+func getNewMigrationFilePath(migrationName string, overwrite bool) (path string, migrationNumber uint, err error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to get working directory: %w", err)
+	}
+	migrationsDir, err := getMigrationsDir()
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to get migrations directory: %w", err)
+	}
 	migrationsCount, err := inspectMigrations(migrationsDir)
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to inspect migrations directory: %w", err)
@@ -374,28 +502,18 @@ func exportToPng(config *internal.Config, wd string) {
 var ErrInvalidModel = errors.New("invalid model")
 
 //nolint:cyclop
-func generateMigrationFile(
+func generateMigrationStatements(
 	config *internal.Config,
-	newMigrationFilePath string,
 	initial bool,
 	targetConn,
 	migrateConn *pgx.Conn,
-) (updated bool, err error) {
+) (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
-		return false, fmt.Errorf("failed to get working directory: %w", err)
+		return "", fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	m, err := os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName)))
-	if err != nil {
-		return false, fmt.Errorf("failed to read model file: %w", err)
-	}
-	mStr := strings.TrimSuffix(string(m), "\n")
-	if mStr == "" || mStr == modelContent {
-		return false, nil
-	}
-	log.Println("Generating migration file")
-	modelContent = mStr
+	log.Println("Generating migration statements")
 
 	go exportToPng(config, wd)
 
@@ -406,7 +524,7 @@ func generateMigrationFile(
 	if err != nil {
 		log.Println(err)
 
-		return false, ErrInvalidModel
+		return "", ErrInvalidModel
 	}
 
 	if initial {
@@ -415,7 +533,7 @@ func generateMigrationFile(
 		if err != nil {
 			log.Println(err)
 
-			return false, ErrInvalidModel
+			return "", ErrInvalidModel
 		}
 
 		// If we are developing the schema initially, there will be no diffs,
@@ -423,97 +541,74 @@ func generateMigrationFile(
 		var input []byte
 		input, err = os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)))
 		if err != nil {
-			return false, fmt.Errorf("failed to read sql file: %w", err)
+			return "", fmt.Errorf("failed to read sql file: %w", err)
 		}
 
-		//nolint:gosec
-		err = os.WriteFile(newMigrationFilePath, input, 0o644)
-		if err != nil {
-			return false, fmt.Errorf("failed to write migration file: %w", err)
-		}
-
-		return true, nil
+		return string(input), nil
 	}
 
 	err = internal.CreateUsers(migrateConn, config.DatabaseUsers)
 	if err != nil {
-		return false, fmt.Errorf("failed to setup migrate database: %w", err)
+		return "", fmt.Errorf("failed to setup migrate database: %w", err)
 	}
 
-	err = executeMigrateSQL(migrateConn, newMigrationFilePath)
+	err = executeMigrateSQL(migrateConn)
 	if err != nil {
-		return false, fmt.Errorf("failed to execute migrate sql: %w", err)
+		return "", fmt.Errorf("failed to execute migrate sql: %w", err)
 	}
 
 	err = internal.CreateUsers(targetConn, config.DatabaseUsers)
 	if err != nil {
-		return false, fmt.Errorf("failed to setup target database: %w", err)
+		return "", fmt.Errorf("failed to setup target database: %w", err)
 	}
 
 	err = executeTargetSQL(targetConn, config)
 	if err != nil {
 		log.Println(err)
 
-		return false, ErrInvalidModel
+		return "", ErrInvalidModel
 	}
 
-	diff, err := internal.Migra(internal.DSN(migrateConn, "disable"), internal.DSN(targetConn, "disable"))
+	statements, err := internal.Migra(internal.DSN(migrateConn, "disable"), internal.DSN(targetConn, "disable"))
 	if err != nil {
 		log.Println(err)
 
-		return false, ErrInvalidModel
+		return "", ErrInvalidModel
 	}
 
 	// Filter stuff from go-migrate that doesn't exist in the target db, and we don't have and need anyway
-	diff = strings.ReplaceAll(
-		diff,
+	statements = strings.ReplaceAll(
+		statements,
 		"alter table \"public\".\"schema_migrations\" drop constraint \"schema_migrations_pkey\";",
 		"",
 	)
-	diff = strings.ReplaceAll(
-		diff,
+	statements = strings.ReplaceAll(
+		statements,
 		"drop index if exists \"public\".\"schema_migrations_pkey\";",
 		"",
 	)
-	diff = strings.ReplaceAll(
-		diff,
+	statements = strings.ReplaceAll(
+		statements,
 		"drop table \"public\".\"schema_migrations\";",
 		"",
 	)
-	diff = strings.Trim(diff, "\n")
+	statements = strings.Trim(statements, "\n")
 
 	var lines []string
-	for _, line := range strings.Split(diff, "\n") {
+	for _, line := range strings.Split(statements, "\n") {
 		if line != "" {
 			lines = append(lines, line)
 		}
 	}
-	diff = strings.Join(lines, "\n") + "\n"
+	statements = strings.Join(lines, "\n") + "\n"
 
-	//nolint:gosec
-	err = os.WriteFile(
-		newMigrationFilePath,
-		[]byte(diff),
-		0o644,
-	)
-	if err != nil {
-		return false, fmt.Errorf("failed to write migration file: %w", err)
-	}
-
-	return true, nil
+	return statements, nil
 }
 
-func executeMigrateSQL(migrateConn *pgx.Conn, newMigrationFilePath string) error {
+func executeMigrateSQL(migrateConn *pgx.Conn) error {
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
-	}
-
-	if _, err = os.Stat(newMigrationFilePath); err == nil {
-		err = os.Remove(newMigrationFilePath)
-		if err != nil {
-			return fmt.Errorf("failed to delete generated migration file: %w", err)
-		}
 	}
 
 	m, err := migrate.New(fmt.Sprintf("file://%s", filepath.Join(wd, "migrations")), internal.DSN(migrateConn, "disable"))
@@ -541,7 +636,7 @@ func executeTargetSQL(targetConn *pgx.Conn, config *internal.Config) error {
 
 	_, err = targetConn.Exec(context.Background(), string(targetSQL))
 	if err != nil {
-		return fmt.Errorf("failed to target sql: %w", err)
+		return fmt.Errorf("failed to execute target sql: %w", err)
 	}
 
 	return nil

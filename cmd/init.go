@@ -149,7 +149,7 @@ func NewInitCommand() *cobra.Command {
 				log.Fatalf("Failed to get working directory: %v\n", wdErr)
 			}
 
-			err = run(config, filepath.Join(wd, "migrations", "001_init.up.sql"), 1)
+			err = runWithFile(config, filepath.Join(wd, "migrations", "001_init.up.sql"), 1)
 			if err != nil {
 				log.Fatalln(err)
 			}
