@@ -527,34 +527,9 @@ func generateMigrationStatements(
 		return "", ErrInvalidModel
 	}
 
-	if initial {
-		// Verify the schema is correct by applying it to the database
-		err = executeTargetSQL(targetConn, config)
-		if err != nil {
-			log.Println(err)
-
-			return "", ErrInvalidModel
-		}
-
-		// If we are developing the schema initially, there will be no diffs,
-		// and we want to copy over the schema file to the initial migration file
-		var input []byte
-		input, err = os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)))
-		if err != nil {
-			return "", fmt.Errorf("failed to read sql file: %w", err)
-		}
-
-		return string(input), nil
-	}
-
 	err = internal.CreateUsers(migrateConn, config.DatabaseUsers)
 	if err != nil {
 		return "", fmt.Errorf("failed to setup migrate database: %w", err)
-	}
-
-	err = executeMigrateSQL(migrateConn)
-	if err != nil {
-		return "", fmt.Errorf("failed to execute migrate sql: %w", err)
 	}
 
 	err = internal.CreateUsers(targetConn, config.DatabaseUsers)
@@ -567,6 +542,23 @@ func generateMigrationStatements(
 		log.Println(err)
 
 		return "", ErrInvalidModel
+	}
+
+	if initial {
+		// If we are developing the schema initially, there will be no diffs,
+		// and we want to copy over the schema file to the initial migration file
+		var input []byte
+		input, err = os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)))
+		if err != nil {
+			return "", fmt.Errorf("failed to read sql file: %w", err)
+		}
+
+		return string(input), nil
+	}
+
+	err = executeMigrateSQL(migrateConn)
+	if err != nil {
+		return "", fmt.Errorf("failed to execute migrate sql: %w", err)
 	}
 
 	statements, err := internal.Migra(internal.DSN(migrateConn, "disable"), internal.DSN(targetConn, "disable"))
