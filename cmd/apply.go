@@ -81,7 +81,7 @@ func NewApplyCommand() *cobra.Command {
 				log.Fatalf("Failed to check if database exists: %v", err)
 			}
 			if !databaseExists {
-				_, err = conn.Exec(context.Background(), fmt.Sprintf("CREATE DATABASE %q;", config.DatabaseName))
+				_, err = conn.Exec(context.Background(), fmt.Sprintf("CREATE DATABASE %q", config.DatabaseName))
 				if err != nil {
 					log.Fatalf("Failed to create database: %v", err)
 				}
@@ -94,7 +94,7 @@ func NewApplyCommand() *cobra.Command {
 					log.Fatalf("Failed to check if user exists: %v", err)
 				}
 				if !userExists {
-					_, err = conn.Exec(context.Background(), fmt.Sprintf("CREATE ROLE %q WITH LOGIN;", u))
+					_, err = conn.Exec(context.Background(), fmt.Sprintf("CREATE ROLE %q WITH LOGIN", u))
 					if err != nil {
 						log.Fatalf("Failed to create user: %v", err)
 					}
@@ -165,6 +165,23 @@ func NewApplyCommand() *cobra.Command {
 				} else if err != nil {
 					log.Fatalln(err)
 				}
+			}
+
+			conn, err = pgx.Connect(context.Background(), dsn)
+			if err != nil {
+				log.Fatalf("Unable to connect to database: %v", err)
+			}
+
+			for _, u := range config.DatabaseUsers {
+				_, err = conn.Exec(context.Background(), fmt.Sprintf("GRANT SELECT ON public.schema_migrations TO %q", u))
+				if err != nil {
+					log.Fatalf("Failed to grant select permission on schema_migrations to %q: %v", u, err)
+				}
+			}
+
+			err = conn.Close(context.Background())
+			if err != nil {
+				log.Fatalf("Failed to close connection: %v", err)
 			}
 
 			log.Println("Successfully migrated database")
