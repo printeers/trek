@@ -131,8 +131,21 @@ func NewInitCommand() *cobra.Command {
 			if err != nil {
 				log.Fatalln(err)
 			}
+			err = os.MkdirAll("hooks", 0o755)
+			if err != nil {
+				log.Fatalln(err)
+			}
 
 			_, err = os.Create("testdata/001_0101-content.sql")
+			if err != nil {
+				log.Fatalln(err)
+			}
+
+			err = writeSampleHook("apply-reset-pre")
+			if err != nil {
+				log.Fatalln(err)
+			}
+			err = writeSampleHook("apply-reset-post")
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -203,4 +216,15 @@ func writeTemplateFile(ts, filename string, templateData map[string]interface{})
 	}
 
 	return nil
+}
+
+func writeSampleHook(name string) error {
+	//nolint:gosec,wrapcheck
+	return os.WriteFile(fmt.Sprintf("hooks/%s.sample", name), []byte(strings.Join([]string{
+		"#!/bin/bash",
+		"set -euxo pipefail",
+		"",
+		fmt.Sprintf("echo \"This is %s\"", name),
+		"",
+	}, "\n")), 0o755)
 }
