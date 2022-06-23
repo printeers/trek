@@ -1,4 +1,4 @@
-FROM golang:1.17-alpine AS build
+FROM golang:1.18-alpine AS build
 
 # Cache module dependencies
 COPY go.mod /trek/go.mod
