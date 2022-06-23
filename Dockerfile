@@ -13,7 +13,7 @@ COPY ./main.go /trek
 RUN go build -o dist/bin/trek .
 
 FROM alpine:latest
-RUN apk add postgresql-client
+RUN apk add postgresql-client bash
 COPY --from=build /trek/dist/bin/trek /usr/local/bin/trek
 
 WORKDIR /data

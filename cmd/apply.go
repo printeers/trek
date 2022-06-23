@@ -67,6 +67,12 @@ func NewApplyCommand() *cobra.Command {
 
 			if resetDatabase {
 				log.Println("Resetting database")
+
+				err = internal.RunHook(wd, "apply-reset-pre")
+				if err != nil {
+					log.Fatalf("Failed to run hook: %v", err)
+				}
+
 				_, err = conn.Exec(
 					context.Background(),
 					fmt.Sprintf("DROP DATABASE IF EXISTS %q WITH (FORCE)", config.DatabaseName),
@@ -157,6 +163,11 @@ func NewApplyCommand() *cobra.Command {
 							log.Fatalf("Failed to run testdata: %v\n", err)
 						}
 					}
+				}
+
+				err = internal.RunHook(wd, "apply-reset-post")
+				if err != nil {
+					log.Fatalf("Failed to run hook: %v", err)
 				}
 			} else {
 				err = m.Up()
