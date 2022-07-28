@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-func RunHook(wd, hookName string) error {
+func RunHook(wd, hookName string, args ...string) error {
 	hooksDir := filepath.Join(wd, "hooks")
 	filePath := filepath.Join(hooksDir, hookName)
 	if _, err := os.Stat(filePath); errors.Is(err, os.ErrNotExist) {
@@ -19,7 +19,7 @@ func RunHook(wd, hookName string) error {
 
 	log.Printf("Running hook %s", hookName)
 
-	cmd := exec.Command(filePath)
+	cmd := exec.Command(filePath, args...)
 	cmd.Dir = hooksDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

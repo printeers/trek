@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -190,6 +191,42 @@ func runWithStdout(
 		if err != nil && !errors.Is(err, ErrInvalidModel) {
 			return fmt.Errorf("failed to generate migration statements: %w", err)
 		}
+
+		file, err := ioutil.TempFile("", "migration")
+		if err != nil {
+			return fmt.Errorf("failed get temporary migration file: %w", err)
+		}
+
+		err = os.WriteFile(
+			file.Name(),
+			[]byte(statements),
+			0o600,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to write temporary migration file: %w", err)
+		}
+
+		wd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get working directory: %w", err)
+		}
+
+		err = internal.RunHook(wd, "generate-migration-post", file.Name())
+		if err != nil {
+			return fmt.Errorf("failed to run hook: %w", err)
+		}
+
+		statementBytes, err := os.ReadFile(file.Name())
+		if err != nil {
+			return fmt.Errorf("failed to read temporary migration file: %w", err)
+		}
+		statements = string(statementBytes)
+
+		err = os.Remove(file.Name())
+		if err != nil {
+			return fmt.Errorf("failed to delete temporary migration file: %w", err)
+		}
+
 		fmt.Println("")
 		fmt.Println("--")
 		fmt.Println(statements)
@@ -249,6 +286,16 @@ func runWithFile(
 			return fmt.Errorf("failed to write migration file: %w", err)
 		}
 		log.Println("Wrote migration file")
+
+		wd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get working directory: %w", err)
+		}
+
+		err = internal.RunHook(wd, "generate-migration-post", newMigrationFilePath)
+		if err != nil {
+			return fmt.Errorf("failed to run hook: %w", err)
+		}
 
 		err = writeTemplateFiles(config, migrationNumber)
 		if err != nil {

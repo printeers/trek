@@ -149,6 +149,10 @@ func NewInitCommand() *cobra.Command {
 			if err != nil {
 				log.Fatalln(err)
 			}
+			err = writeSampleHook("generate-migration-post", "echo \"Running on migration file $1\"")
+			if err != nil {
+				log.Fatalln(err)
+			}
 
 			log.Println("New project created!")
 
@@ -218,13 +222,19 @@ func writeTemplateFile(ts, filename string, templateData map[string]interface{})
 	return nil
 }
 
-func writeSampleHook(name string) error {
-	//nolint:gosec,wrapcheck
-	return os.WriteFile(fmt.Sprintf("hooks/%s.sample", name), []byte(strings.Join([]string{
+func writeSampleHook(name string, extraLines ...string) error {
+	lines := []string{
 		"#!/bin/bash",
 		"set -euxo pipefail",
 		"",
 		fmt.Sprintf("echo \"This is %s\"", name),
-		"",
-	}, "\n")), 0o755)
+	}
+	if len(extraLines) > 0 {
+		lines = append(lines, extraLines...)
+	}
+
+	lines = append(lines, "")
+
+	//nolint:gosec,wrapcheck
+	return os.WriteFile(fmt.Sprintf("hooks/%s.sample", name), []byte(strings.Join(lines, "\n")), 0o755)
 }
