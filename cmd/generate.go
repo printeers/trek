@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -192,7 +191,7 @@ func runWithStdout(
 			return fmt.Errorf("failed to generate migration statements: %w", err)
 		}
 
-		file, err := ioutil.TempFile("", "migration")
+		file, err := os.CreateTemp("", "migration")
 		if err != nil {
 			return fmt.Errorf("failed get temporary migration file: %w", err)
 		}

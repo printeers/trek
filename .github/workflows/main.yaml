@@ -20,7 +20,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v2
         with:
-          version: v1.46.2
+          version: v1.48.0
   build-and-push-images:
     needs: golangci
     runs-on: ubuntu-latest
