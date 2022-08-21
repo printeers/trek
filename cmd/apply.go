@@ -93,6 +93,16 @@ func NewApplyCommand() *cobra.Command {
 				}
 			}
 
+			schemaMigrationsTableExists, err := internal.CheckTableExists(conn, "public", "schema_migrations")
+			if err != nil {
+				log.Fatalf("Failed to check if public.schema_migrations exists: %v", err)
+			}
+
+			if schemaMigrationsTableExists != databaseExists {
+				//nolint:lll
+				log.Fatalf("Something is wrong, the database and the schema_migrations table should always exist or not exist together!")
+			}
+
 			for _, u := range config.DatabaseUsers {
 				var userExists bool
 				userExists, err = internal.CheckUserExists(conn, u)
@@ -127,7 +137,7 @@ func NewApplyCommand() *cobra.Command {
 				log.Fatalln(err)
 			}
 
-			if resetDatabase {
+			if resetDatabase || (!databaseExists && !schemaMigrationsTableExists) {
 				var files []os.DirEntry
 				files, err = os.ReadDir(filepath.Join(wd, "migrations"))
 				if err != nil {

@@ -80,27 +80,48 @@ func CreateUsers(conn *pgx.Conn, users []string) error {
 }
 
 func CheckDatabaseExists(conn *pgx.Conn, user string) (bool, error) {
-	a := conn.QueryRow(context.Background(), fmt.Sprintf("SELECT COUNT(*) FROM pg_database WHERE datname='%s';", user))
+	a := conn.QueryRow(
+		context.Background(),
+		fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname='%s');", user),
+	)
 
-	var b int64
+	var b bool
 	err := a.Scan(&b)
 	if err != nil {
 		return false, fmt.Errorf("failed to decode row: %w", err)
 	}
 
-	return b != 0, nil
+	return b, nil
 }
 
 func CheckUserExists(conn *pgx.Conn, user string) (bool, error) {
-	a := conn.QueryRow(context.Background(), fmt.Sprintf("SELECT COUNT(*) FROM pg_roles WHERE rolname='%s';", user))
+	a := conn.QueryRow(
+		context.Background(),
+		fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='%s');", user),
+	)
 
-	var b int64
+	var b bool
 	err := a.Scan(&b)
 	if err != nil {
 		return false, fmt.Errorf("failed to decode row: %w", err)
 	}
 
-	return b != 0, nil
+	return b, nil
+}
+
+func CheckTableExists(conn *pgx.Conn, schema, name string) (bool, error) {
+	a := conn.QueryRow(
+		context.Background(),
+		fmt.Sprintf("SELECT EXISTS(SELECT FROM pg_tables WHERE schemaname = '%s' AND tablename = '%s');", schema, name),
+	)
+
+	var b bool
+	err := a.Scan(&b)
+	if err != nil {
+		return false, fmt.Errorf("failed to decode row: %w", err)
+	}
+
+	return b, nil
 }
 
 func DSN(conn *pgx.Conn, sslmode string) string {
