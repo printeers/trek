@@ -1,16 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
 CAUTION: Do not modify this file unless you know what you are doing.
-         Unexpected results may occur if the code is changed deliberately.
+ Unexpected results may occur if the code is changed deliberately.
 -->
-<dbmodel pgmodeler-ver="0.9.3" use-changelog="false" last-position="0,0" last-zoom="1" max-obj-count="4"
-	 default-schema="public" default-owner="postgres">
+<dbmodel pgmodeler-ver="0.9.4" use-changelog="false" last-position="0,0" last-zoom="1" max-obj-count="4"
+	 default-owner="postgres">
 
 <role name="alice" sql-disabled="true" />
 <role name="bob" sql-disabled="true" />
 
 <database name="bar" is-template="false" allow-conns="true" sql-disabled="true"/>
 
-<schema name="public" layer="0" fill-color="#e1e1e1" sql-disabled="true"/>
+<schema name="public" layers="0" rect-visible="true" fill-color="#e1e1e1" sql-disabled="true">
+	<role name="postgres"/>
+</schema>
 
 </dbmodel>

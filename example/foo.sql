@@ -1,5 +1,5 @@
 -- Database generated with pgModeler (PostgreSQL Database Modeler).
--- pgModeler  version: 0.9.3
+-- pgModeler version: 0.9.4
 -- PostgreSQL version: 13.0
 -- Project Site: pgmodeler.io
 -- Model Author: ---
