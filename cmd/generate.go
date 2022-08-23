@@ -69,6 +69,8 @@ func NewGenerateCommand() *cobra.Command {
 			return nil
 		},
 		Run: func(cmd *cobra.Command, args []string) {
+			ctx := context.Background()
+
 			config, err := internal.ReadConfig()
 			if err != nil {
 				log.Fatalf("Failed to read config: %v\n", err)
@@ -91,7 +93,7 @@ func NewGenerateCommand() *cobra.Command {
 				initial := migrationsCount == 0
 
 				runnerFunc = func() error {
-					return runWithStdout(config, initial)
+					return runWithStdout(ctx, config, initial)
 				}
 			} else {
 				migrationName := args[0]
@@ -114,7 +116,7 @@ func NewGenerateCommand() *cobra.Command {
 				}()
 
 				runnerFunc = func() error {
-					return runWithFile(config, newMigrationFilePath, migrationNumber)
+					return runWithFile(ctx, config, newMigrationFilePath, migrationNumber)
 				}
 			}
 
@@ -143,13 +145,13 @@ func NewGenerateCommand() *cobra.Command {
 	return generateCmd
 }
 
-func setupDatabase(name string, port uint32) (*embeddedpostgres.EmbeddedPostgres, *pgx.Conn) {
+func setupDatabase(ctx context.Context, name string, port uint32) (*embeddedpostgres.EmbeddedPostgres, *pgx.Conn) {
 	postgres, dsn := internal.NewPostgresDatabase(fmt.Sprintf("/tmp/trek/%s", name), port)
 	err := postgres.Start()
 	if err != nil {
 		log.Fatalf("Failed to start %s database: %v", name, err)
 	}
-	conn, err := pgx.Connect(context.Background(), dsn)
+	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
 		log.Fatalf("Unable to connect to %s database: %v", name, err)
 	}
@@ -160,6 +162,7 @@ func setupDatabase(name string, port uint32) (*embeddedpostgres.EmbeddedPostgres
 type RunnerFunc = func() error
 
 func runWithStdout(
+	ctx context.Context,
 	config *internal.Config,
 	initial bool,
 ) error {
@@ -168,20 +171,21 @@ func runWithStdout(
 		return fmt.Errorf("failed to check if model has been updated: %w", err)
 	}
 	if updated {
-		targetPostgres, targetConn := setupDatabase("target", 5432)
+		targetPostgres, targetConn := setupDatabase(ctx, "target", 5432)
 		defer func() {
-			_ = targetConn.Close(context.Background())
+			_ = targetConn.Close(ctx)
 			_ = targetPostgres.Stop()
 		}()
 
-		migratePostgres, migrateConn := setupDatabase("migrate", 5433)
+		migratePostgres, migrateConn := setupDatabase(ctx, "migrate", 5433)
 		defer func() {
-			_ = migrateConn.Close(context.Background())
+			_ = migrateConn.Close(ctx)
 			_ = migratePostgres.Stop()
 		}()
 
 		var statements string
 		statements, err = generateMigrationStatements(
+			ctx,
 			config,
 			initial,
 			targetConn,
@@ -236,6 +240,7 @@ func runWithStdout(
 }
 
 func runWithFile(
+	ctx context.Context,
 	config *internal.Config,
 	newMigrationFilePath string,
 	migrationNumber uint,
@@ -252,20 +257,21 @@ func runWithFile(
 			}
 		}
 
-		targetPostgres, targetConn := setupDatabase("target", 5432)
+		targetPostgres, targetConn := setupDatabase(ctx, "target", 5432)
 		defer func() {
-			_ = targetConn.Close(context.Background())
+			_ = targetConn.Close(ctx)
 			_ = targetPostgres.Stop()
 		}()
 
-		migratePostgres, migrateConn := setupDatabase("migrate", 5433)
+		migratePostgres, migrateConn := setupDatabase(ctx, "migrate", 5433)
 		defer func() {
-			_ = migrateConn.Close(context.Background())
+			_ = migrateConn.Close(ctx)
 			_ = migratePostgres.Stop()
 		}()
 
 		var statements string
 		statements, err = generateMigrationStatements(
+			ctx,
 			config,
 			migrationNumber == 1,
 			targetConn,
@@ -301,7 +307,7 @@ func runWithFile(
 			return fmt.Errorf("failed to write template files: %w", err)
 		}
 
-		updated, err = generateDiffLockFile(newMigrationFilePath, targetConn, migrateConn)
+		updated, err = generateDiffLockFile(ctx, newMigrationFilePath, targetConn, migrateConn)
 		if err != nil {
 			return fmt.Errorf("failed to generate diff lock file: %w", err)
 		}
@@ -335,12 +341,17 @@ func checkIfUpdated(config *internal.Config) (bool, error) {
 	return true, nil
 }
 
-func generateDiffLockFile(newMigrationFilePath string, targetConn, migrateConn *pgx.Conn) (bool, error) {
+func generateDiffLockFile(
+	ctx context.Context,
+	newMigrationFilePath string,
+	targetConn,
+	migrateConn *pgx.Conn,
+) (bool, error) {
 	newMigrationFileContent, err := os.ReadFile(newMigrationFilePath)
 	if err != nil {
 		return false, fmt.Errorf("failed to read new migratio file: %w", err)
 	}
-	_, err = migrateConn.Exec(context.Background(), string(newMigrationFileContent))
+	_, err = migrateConn.Exec(ctx, string(newMigrationFileContent))
 	if err != nil {
 		return false, fmt.Errorf("failed to apply generated migration: %w", err)
 	}
@@ -549,6 +560,7 @@ var ErrInvalidModel = errors.New("invalid model")
 
 //nolint:cyclop
 func generateMigrationStatements(
+	ctx context.Context,
 	config *internal.Config,
 	initial bool,
 	targetConn,
@@ -573,17 +585,17 @@ func generateMigrationStatements(
 		return "", ErrInvalidModel
 	}
 
-	err = internal.CreateUsers(migrateConn, config.DatabaseUsers)
+	err = internal.CreateUsers(ctx, migrateConn, config.DatabaseUsers)
 	if err != nil {
 		return "", fmt.Errorf("failed to setup migrate database: %w", err)
 	}
 
-	err = internal.CreateUsers(targetConn, config.DatabaseUsers)
+	err = internal.CreateUsers(ctx, targetConn, config.DatabaseUsers)
 	if err != nil {
 		return "", fmt.Errorf("failed to setup target database: %w", err)
 	}
 
-	err = executeTargetSQL(targetConn, config)
+	err = executeTargetSQL(ctx, targetConn, config)
 	if err != nil {
 		log.Println(err)
 
@@ -661,7 +673,7 @@ func executeMigrateSQL(migrateConn *pgx.Conn) error {
 	return nil
 }
 
-func executeTargetSQL(targetConn *pgx.Conn, config *internal.Config) error {
+func executeTargetSQL(ctx context.Context, targetConn *pgx.Conn, config *internal.Config) error {
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
@@ -672,7 +684,7 @@ func executeTargetSQL(targetConn *pgx.Conn, config *internal.Config) error {
 		return fmt.Errorf("failed to read target sql: %w", err)
 	}
 
-	_, err = targetConn.Exec(context.Background(), string(targetSQL))
+	_, err = targetConn.Exec(ctx, string(targetSQL))
 	if err != nil {
 		return fmt.Errorf("failed to execute target sql: %w", err)
 	}
