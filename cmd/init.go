@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -36,6 +37,8 @@ func NewInitCommand() *cobra.Command {
 			return nil
 		},
 		Run: func(cmd *cobra.Command, args []string) {
+			ctx := context.Background()
+
 			var err error
 
 			if version == "" {
@@ -166,7 +169,7 @@ func NewInitCommand() *cobra.Command {
 				log.Fatalf("Failed to get working directory: %v\n", wdErr)
 			}
 
-			err = runWithFile(config, filepath.Join(wd, "migrations", "001_init.up.sql"), 1)
+			err = runWithFile(ctx, config, filepath.Join(wd, "migrations", "001_init.up.sql"), 1)
 			if err != nil {
 				log.Fatalln(err)
 			}
