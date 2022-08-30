@@ -42,14 +42,14 @@ func NewApplyCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
-			config, err := internal.ReadConfig()
-			if err != nil {
-				return fmt.Errorf("failed to read config: %w", err)
-			}
-
 			wd, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("failed to get working directory: %w", err)
+			}
+
+			config, err := internal.ReadConfig(wd)
+			if err != nil {
+				return fmt.Errorf("failed to read config: %w", err)
 			}
 
 			conn, err := pgx.Connect(ctx, fmt.Sprintf(
@@ -132,14 +132,19 @@ func NewApplyCommand() *cobra.Command {
 				postgresSSLMode,
 			)
 
-			m, err := migrate.New(fmt.Sprintf("file://%s", filepath.Join(wd, "migrations")), dsn)
+			migrationsDir, err := internal.GetMigrationsDir(wd)
+			if err != nil {
+				return fmt.Errorf("failed to get migrations directory: %w", err)
+			}
+
+			m, err := migrate.New(fmt.Sprintf("file://%s", migrationsDir), dsn)
 			if err != nil {
 				return fmt.Errorf("failed to initialize go-migrate: %w", err)
 			}
 
 			if resetDatabase || (!databaseExists && !schemaMigrationsTableExists) {
 				var files []os.DirEntry
-				files, err = os.ReadDir(filepath.Join(wd, "migrations"))
+				files, err = os.ReadDir(migrationsDir)
 				if err != nil {
 					return fmt.Errorf("failed to read migrations: %w", err)
 				}

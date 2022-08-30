@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"text/template"
 	"time"
@@ -17,14 +15,9 @@ import (
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/jackc/pgx/v4"
-	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
 
 	"github.com/stack11/trek/internal"
-)
-
-const (
-	regexpPartialLowerKebabCase = `[a-z][a-z0-9\-]*[a-z]`
 )
 
 //nolint:gocognit,cyclop
@@ -57,8 +50,7 @@ func NewGenerateCommand() *cobra.Command {
 					return errors.New("expecting one migration name, use lower-kebab-case for the migration name")
 				}
 
-				var regexpLowerKebabCase = regexp.MustCompile(`^` + regexpPartialLowerKebabCase + `$`)
-				if !regexpLowerKebabCase.MatchString(args[0]) {
+				if !internal.RegexpMigrationName.MatchString(args[0]) {
 					//nolint:goerr113
 					return errors.New("migration name must be lower-kebab-case and must not start or end with a number or dash")
 				}
@@ -69,26 +61,27 @@ func NewGenerateCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
-			config, err := internal.ReadConfig()
-			if err != nil {
-				return fmt.Errorf("failed to read config: %w", err)
-			}
-
 			wd, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("failed to get working directory: %w", err)
 			}
 
+			config, err := internal.ReadConfig(wd)
+			if err != nil {
+				return fmt.Errorf("failed to read config: %w", err)
+			}
+
+			var migrationsDir string
+			migrationsDir, err = internal.GetMigrationsDir(wd)
+			if err != nil {
+				return fmt.Errorf("failed to get migrations directory: %w", err)
+			}
+
 			var runnerFunc func() error
 
 			if stdout {
-				var migrationsDir string
-				migrationsDir, err = getMigrationsDir(wd)
-				if err != nil {
-					return fmt.Errorf("failed to get migrations directory: %w", err)
-				}
 				var migrationsCount uint
-				migrationsCount, err = inspectMigrations(migrationsDir)
+				migrationsCount, err = internal.InspectMigrations(migrationsDir)
 				if err != nil {
 					return fmt.Errorf("failed to get inspect migrations directory: %w", err)
 				}
@@ -96,13 +89,17 @@ func NewGenerateCommand() *cobra.Command {
 				initial := migrationsCount == 0
 
 				runnerFunc = func() error {
-					return runWithStdout(ctx, config, wd, initial)
+					return runWithStdout(ctx, config, wd, migrationsDir, initial)
 				}
 			} else {
 				migrationName := args[0]
 				var newMigrationFilePath string
 				var migrationNumber uint
-				newMigrationFilePath, migrationNumber, err = getNewMigrationFilePath(wd, migrationName, overwrite)
+				newMigrationFilePath, migrationNumber, err = internal.GetNewMigrationFilePath(
+					migrationsDir,
+					migrationName,
+					overwrite,
+				)
 				if err != nil {
 					return fmt.Errorf("failed to get new migration file path: %w", err)
 				}
@@ -119,7 +116,7 @@ func NewGenerateCommand() *cobra.Command {
 				}()
 
 				runnerFunc = func() error {
-					return runWithFile(ctx, config, wd, newMigrationFilePath, migrationNumber)
+					return runWithFile(ctx, config, wd, migrationsDir, newMigrationFilePath, migrationNumber)
 				}
 			}
 
@@ -152,6 +149,7 @@ func NewGenerateCommand() *cobra.Command {
 
 func setupDatabase(
 	ctx context.Context,
+	tmpDir,
 	name string,
 	port uint32,
 ) (
@@ -159,11 +157,12 @@ func setupDatabase(
 	*pgx.Conn,
 	error,
 ) {
-	postgres, dsn := internal.NewPostgresDatabase(fmt.Sprintf("/tmp/trek/%s", name), port)
+	postgres, dsn := internal.NewPostgresDatabase(filepath.Join(tmpDir, name), port)
 	err := postgres.Start()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to start %q database: %w", name, err)
 	}
+
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to connect to %q database: %w", name, err)
@@ -176,7 +175,8 @@ func setupDatabase(
 func runWithStdout(
 	ctx context.Context,
 	config *internal.Config,
-	wd string,
+	wd,
+	migrationsDir string,
 	initial bool,
 ) error {
 	updated, err := checkIfUpdated(config, wd)
@@ -184,7 +184,13 @@ func runWithStdout(
 		return fmt.Errorf("failed to check if model has been updated: %w", err)
 	}
 	if updated {
-		targetPostgres, targetConn, err := setupDatabase(ctx, "target", 5432)
+		tmpDir, err := os.MkdirTemp("", "trek-")
+		if err != nil {
+			return fmt.Errorf("failed to create temporary directory: %w", err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		targetPostgres, targetConn, err := setupDatabase(ctx, tmpDir, "target", 5432)
 		defer func() {
 			if targetConn != nil {
 				_ = targetConn.Close(ctx)
@@ -197,7 +203,7 @@ func runWithStdout(
 			return fmt.Errorf("failed to setup target database: %w", err)
 		}
 
-		migratePostgres, migrateConn, err := setupDatabase(ctx, "migrate", 5433)
+		migratePostgres, migrateConn, err := setupDatabase(ctx, tmpDir, "migrate", 5433)
 		defer func() {
 			if migrateConn != nil {
 				_ = migrateConn.Close(ctx)
@@ -215,6 +221,7 @@ func runWithStdout(
 			ctx,
 			config,
 			wd,
+			migrationsDir,
 			initial,
 			targetConn,
 			migrateConn,
@@ -267,7 +274,8 @@ func runWithStdout(
 func runWithFile(
 	ctx context.Context,
 	config *internal.Config,
-	wd string,
+	wd,
+	migrationsDir,
 	newMigrationFilePath string,
 	migrationNumber uint,
 ) error {
@@ -283,7 +291,13 @@ func runWithFile(
 			}
 		}
 
-		targetPostgres, targetConn, err := setupDatabase(ctx, "target", 5432)
+		tmpDir, err := os.MkdirTemp("", "trek-")
+		if err != nil {
+			return fmt.Errorf("failed to create temporary directory: %w", err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		targetPostgres, targetConn, err := setupDatabase(ctx, tmpDir, "target", 5432)
 		defer func() {
 			if targetConn != nil {
 				_ = targetConn.Close(ctx)
@@ -296,7 +310,7 @@ func runWithFile(
 			return fmt.Errorf("failed to setup target database: %w", err)
 		}
 
-		migratePostgres, migrateConn, err := setupDatabase(ctx, "migrate", 5433)
+		migratePostgres, migrateConn, err := setupDatabase(ctx, tmpDir, "migrate", 5433)
 		defer func() {
 			if migrateConn != nil {
 				_ = migrateConn.Close(ctx)
@@ -314,6 +328,7 @@ func runWithFile(
 			ctx,
 			config,
 			wd,
+			migrationsDir,
 			migrationNumber == 1,
 			targetConn,
 			migrateConn,
@@ -343,7 +358,7 @@ func runWithFile(
 			return fmt.Errorf("failed to write template files: %w", err)
 		}
 
-		updated, err = generateDiffLockFile(ctx, wd, newMigrationFilePath, targetConn, migrateConn)
+		updated, err = generateDiffLockFile(ctx, wd, tmpDir, newMigrationFilePath, targetConn, migrateConn)
 		if err != nil {
 			return fmt.Errorf("failed to generate diff lock file: %w", err)
 		}
@@ -374,7 +389,8 @@ func checkIfUpdated(config *internal.Config, wd string) (bool, error) {
 
 func generateDiffLockFile(
 	ctx context.Context,
-	wd string,
+	wd,
+	tmpDir string,
 	newMigrationFilePath string,
 	targetConn,
 	migrateConn *pgx.Conn,
@@ -389,7 +405,7 @@ func generateDiffLockFile(
 	}
 
 	var diff string
-	diff, err = diffSchemaDumps(targetConn, migrateConn)
+	diff, err = diffSchemaDumps(tmpDir, targetConn, migrateConn)
 	if err != nil {
 		return false, fmt.Errorf("failed to diff schema dumps: %w", err)
 	}
@@ -420,7 +436,7 @@ func generateDiffLockFile(
 	return false, nil
 }
 
-func diffSchemaDumps(targetConn, migrateConn *pgx.Conn) (string, error) {
+func diffSchemaDumps(tmpDir string, targetConn, migrateConn *pgx.Conn) (string, error) {
 	pgDumpOptions := []string{
 		"--schema-only",
 		"--exclude-table=public.schema_migrations",
@@ -438,13 +454,13 @@ func diffSchemaDumps(targetConn, migrateConn *pgx.Conn) (string, error) {
 		return "", err
 	}
 
-	targetDumpFile := "/tmp/target.sql"
+	targetDumpFile := filepath.Join(tmpDir, "target.sql")
 	err = os.WriteFile(targetDumpFile, []byte(cleanDump(targetDump)), 0o600)
 	if err != nil {
 		return "", fmt.Errorf("failed to write target.sql file: %w", err)
 	}
 
-	migrateDumpFile := "/tmp/migrate.sql"
+	migrateDumpFile := filepath.Join(tmpDir, "migrate.sql")
 	err = os.WriteFile(migrateDumpFile, []byte(cleanDump(migrateDump)), 0o600)
 	if err != nil {
 		return "", fmt.Errorf("failed to write migrate.sql file: %w", err)
@@ -507,66 +523,6 @@ func writeTemplateFiles(config *internal.Config, newVersion uint) error {
 	return nil
 }
 
-func getMigrationsDir(wd string) (string, error) {
-	migrationsDir := filepath.Join(wd, "migrations")
-	if _, err := os.Stat(migrationsDir); os.IsNotExist(err) {
-		err = os.Mkdir(migrationsDir, 0o755)
-		if err != nil {
-			return "", fmt.Errorf("failed to create migrations directory: %w", err)
-		}
-	}
-
-	return migrationsDir, nil
-}
-
-func getNewMigrationFilePath(
-	wd string,
-	migrationName string,
-	overwrite bool,
-) (
-	path string,
-	migrationNumber uint,
-	err error,
-) {
-	migrationsDir, err := getMigrationsDir(wd)
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to get migrations directory: %w", err)
-	}
-	migrationsCount, err := inspectMigrations(migrationsDir)
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to inspect migrations directory: %w", err)
-	}
-
-	var migrationsNumber uint
-	if _, err = os.Stat(
-		filepath.Join(wd, "migrations", getMigrationFileName(migrationsCount, migrationName)),
-	); err == nil {
-		if overwrite {
-			migrationsNumber = migrationsCount
-		} else {
-			prompt := promptui.Prompt{
-				//nolint:lll
-				Label:     "The previous migration has the same name. Overwrite the previous migration instead of creating a new one",
-				IsConfirm: true,
-				Default:   "y",
-			}
-			if _, err = prompt.Run(); err == nil {
-				migrationsNumber = migrationsCount
-			} else {
-				migrationsNumber = migrationsCount + 1
-			}
-		}
-	} else {
-		migrationsNumber = migrationsCount + 1
-	}
-
-	return filepath.Join(wd, "migrations", getMigrationFileName(migrationsNumber, migrationName)), migrationsNumber, nil
-}
-
-func getMigrationFileName(migrationNumber uint, migrationName string) string {
-	return fmt.Sprintf("%03d_%s.up.sql", migrationNumber, migrationName)
-}
-
 var (
 	//nolint:gochecknoglobals
 	modelContent = ""
@@ -576,7 +532,8 @@ var (
 func generateMigrationStatements(
 	ctx context.Context,
 	config *internal.Config,
-	wd string,
+	wd,
+	migrationsDir string,
 	initial bool,
 	targetConn,
 	migrateConn *pgx.Conn,
@@ -630,7 +587,7 @@ func generateMigrationStatements(
 		return &str, nil
 	}
 
-	err = executeMigrateSQL(wd, migrateConn)
+	err = executeMigrateSQL(migrationsDir, migrateConn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute migrate sql: %w", err)
 	}
@@ -669,8 +626,8 @@ func generateMigrationStatements(
 	return &statements, nil
 }
 
-func executeMigrateSQL(wd string, migrateConn *pgx.Conn) error {
-	m, err := migrate.New(fmt.Sprintf("file://%s", filepath.Join(wd, "migrations")), internal.DSN(migrateConn, "disable"))
+func executeMigrateSQL(migrationsDir string, migrateConn *pgx.Conn) error {
+	m, err := migrate.New(fmt.Sprintf("file://%s", migrationsDir), internal.DSN(migrateConn, "disable"))
 	if err != nil {
 		return fmt.Errorf("failed to create migrate: %w", err)
 	}
@@ -694,26 +651,4 @@ func executeTargetSQL(ctx context.Context, config *internal.Config, wd string, t
 	}
 
 	return nil
-}
-
-func inspectMigrations(migrationsDir string) (migrationsCount uint, err error) {
-	err = filepath.WalkDir(migrationsDir, func(path string, d fs.DirEntry, err error) error {
-		if path == migrationsDir {
-			return nil
-		}
-		if d.IsDir() {
-			return filepath.SkipDir
-		}
-		var regexpValidMigrationFilename = regexp.MustCompile(`^\d{3}_` + regexpPartialLowerKebabCase + `\.up\.sql$`)
-		if !regexpValidMigrationFilename.MatchString(d.Name()) {
-			//nolint:goerr113
-			return fmt.Errorf("invalid existing migration filename %q", d.Name())
-		}
-		migrationsCount++
-
-		return nil
-	})
-
-	//nolint:wrapcheck
-	return migrationsCount, err
 }
