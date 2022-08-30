@@ -1,26 +1,23 @@
 package internal
 
 import (
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
+
+	"github.com/amenzhinsky/go-memexec"
 
 	"github.com/stack11/trek/internal/embed"
 )
 
 func Migra(from, to string) (string, error) {
-	outBinary := "/tmp/migra"
-	if _, err := os.Stat(outBinary); errors.Is(err, os.ErrNotExist) {
-		//nolint:gosec
-		err = os.WriteFile(outBinary, embed.MigraBinary, 0o700)
-		if err != nil {
-			return "", fmt.Errorf("failed to extract migra binary: %w", err)
-		}
+	exe, err := memexec.New(embed.MigraBinary)
+	if err != nil {
+		return "", fmt.Errorf("failed to load migra binary: %w", err)
 	}
+	defer exe.Close()
 
-	cmdMigra := exec.Command(outBinary, "--unsafe", "--with-privileges", from, to)
+	cmdMigra := exe.Command("--unsafe", "--with-privileges", from, to)
 	cmdMigra.Stderr = os.Stderr
 	output, err := cmdMigra.Output()
 	if err != nil && cmdMigra.ProcessState.ExitCode() != 2 {
