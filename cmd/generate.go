@@ -216,11 +216,11 @@ func runWithStdout(
 			return fmt.Errorf("failed to setup migrate database: %w", err)
 		}
 
-		var statements *string
-		statements, err = generateMigrationStatements(
+		statements, err := generateMigrationStatements(
 			ctx,
 			config,
 			wd,
+			tmpDir,
 			migrationsDir,
 			initial,
 			targetConn,
@@ -237,7 +237,7 @@ func runWithStdout(
 
 		err = os.WriteFile(
 			file.Name(),
-			[]byte(*statements),
+			[]byte(statements),
 			0o600,
 		)
 		if err != nil {
@@ -253,8 +253,7 @@ func runWithStdout(
 		if err != nil {
 			return fmt.Errorf("failed to read temporary migration file: %w", err)
 		}
-		tmpStatementStr := string(tmpStatementBytes)
-		statements = &tmpStatementStr
+		statements = string(tmpStatementBytes)
 
 		err = os.Remove(file.Name())
 		if err != nil {
@@ -263,7 +262,7 @@ func runWithStdout(
 
 		fmt.Println("")
 		fmt.Println("--")
-		fmt.Println(*statements)
+		fmt.Println(statements)
 		fmt.Println("--")
 	}
 
@@ -323,11 +322,11 @@ func runWithFile(
 			return fmt.Errorf("failed to setup migrate database: %w", err)
 		}
 
-		var statements *string
-		statements, err = generateMigrationStatements(
+		statements, err := generateMigrationStatements(
 			ctx,
 			config,
 			wd,
+			tmpDir,
 			migrationsDir,
 			migrationNumber == 1,
 			targetConn,
@@ -340,7 +339,7 @@ func runWithFile(
 		//nolint:gosec
 		err = os.WriteFile(
 			newMigrationFilePath,
-			[]byte(*statements),
+			[]byte(statements),
 			0o644,
 		)
 		if err != nil {
@@ -356,15 +355,6 @@ func runWithFile(
 		err = writeTemplateFiles(config, migrationNumber)
 		if err != nil {
 			return fmt.Errorf("failed to write template files: %w", err)
-		}
-
-		updated, err = generateDiffLockFile(ctx, wd, tmpDir, newMigrationFilePath, targetConn, migrateConn)
-		if err != nil {
-			return fmt.Errorf("failed to generate diff lock file: %w", err)
-		}
-
-		if updated {
-			log.Println("Wrote diff lock file")
 		}
 	}
 
@@ -385,115 +375,6 @@ func checkIfUpdated(config *internal.Config, wd string) (bool, error) {
 	log.Println("Changes detected")
 
 	return true, nil
-}
-
-func generateDiffLockFile(
-	ctx context.Context,
-	wd,
-	tmpDir string,
-	newMigrationFilePath string,
-	targetConn,
-	migrateConn *pgx.Conn,
-) (bool, error) {
-	newMigrationFileContent, err := os.ReadFile(newMigrationFilePath)
-	if err != nil {
-		return false, fmt.Errorf("failed to read new migratio file: %w", err)
-	}
-	_, err = migrateConn.Exec(ctx, string(newMigrationFileContent))
-	if err != nil {
-		return false, fmt.Errorf("failed to apply generated migration: %w", err)
-	}
-
-	var diff string
-	diff, err = diffSchemaDumps(tmpDir, targetConn, migrateConn)
-	if err != nil {
-		return false, fmt.Errorf("failed to diff schema dumps: %w", err)
-	}
-
-	lockfile := filepath.Join(wd, "diff.lock")
-	hasStoredDiff := false
-	var storedDiff string
-
-	if _, err = os.Stat(lockfile); err == nil {
-		hasStoredDiff = true
-		var s []byte
-		s, err = os.ReadFile(lockfile)
-		if err != nil {
-			return false, fmt.Errorf("failed to read diff.lock file: %w", err)
-		}
-		storedDiff = string(s)
-	}
-
-	if !hasStoredDiff || diff != storedDiff {
-		err = os.WriteFile(lockfile, []byte(diff), 0o600)
-		if err != nil {
-			return false, fmt.Errorf("failed to write diff.lock file: %w", err)
-		}
-
-		return true, nil
-	}
-
-	return false, nil
-}
-
-func diffSchemaDumps(tmpDir string, targetConn, migrateConn *pgx.Conn) (string, error) {
-	pgDumpOptions := []string{
-		"--schema-only",
-		"--exclude-table=public.schema_migrations",
-	}
-
-	targetDump, err := internal.PgDump(internal.DSN(targetConn, "disable"), pgDumpOptions)
-	if err != nil {
-		//nolint:wrapcheck
-		return "", err
-	}
-
-	migrateDump, err := internal.PgDump(internal.DSN(migrateConn, "disable"), pgDumpOptions)
-	if err != nil {
-		//nolint:wrapcheck
-		return "", err
-	}
-
-	targetDumpFile := filepath.Join(tmpDir, "target.sql")
-	err = os.WriteFile(targetDumpFile, []byte(cleanDump(targetDump)), 0o600)
-	if err != nil {
-		return "", fmt.Errorf("failed to write target.sql file: %w", err)
-	}
-
-	migrateDumpFile := filepath.Join(tmpDir, "migrate.sql")
-	err = os.WriteFile(migrateDumpFile, []byte(cleanDump(migrateDump)), 0o600)
-	if err != nil {
-		return "", fmt.Errorf("failed to write migrate.sql file: %w", err)
-	}
-
-	gitDiffCmd := exec.Command(
-		"git",
-		"diff",
-		migrateDumpFile,
-		targetDumpFile,
-	)
-	gitDiffCmd.Stderr = os.Stderr
-
-	output, err := gitDiffCmd.Output()
-	if err != nil {
-		var ee *exec.ExitError
-		if !(errors.As(err, &ee) && ee.ExitCode() <= 1) {
-			return "", fmt.Errorf("failed to run git diff: %w %s", err, string(output))
-		}
-	}
-
-	return string(output), nil
-}
-
-func cleanDump(dump string) string {
-	var lines []string
-	for _, line := range strings.Split(dump, "\n") {
-		if line != "" && !strings.HasPrefix(line, "--") {
-			lines = append(lines, line)
-		}
-	}
-
-	return strings.Join(lines, "\n")
 }
 
 func writeTemplateFiles(config *internal.Config, newVersion uint) error {
@@ -533,11 +414,12 @@ func generateMigrationStatements(
 	ctx context.Context,
 	config *internal.Config,
 	wd,
+	tmpDir,
 	migrationsDir string,
 	initial bool,
 	targetConn,
 	migrateConn *pgx.Conn,
-) (*string, error) {
+) (string, error) {
 	log.Println("Generating migration statements")
 
 	err := internal.PgModelerExportToFile(
@@ -545,7 +427,7 @@ func generateMigrationStatements(
 		filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to export model: %w", err)
+		return "", fmt.Errorf("failed to export model: %w", err)
 	}
 
 	go func() {
@@ -560,17 +442,17 @@ func generateMigrationStatements(
 
 	err = internal.CreateUsers(ctx, migrateConn, config.DatabaseUsers)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create migrate users: %w", err)
+		return "", fmt.Errorf("failed to create migrate users: %w", err)
 	}
 
 	err = internal.CreateUsers(ctx, targetConn, config.DatabaseUsers)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create target users: %w", err)
+		return "", fmt.Errorf("failed to create target users: %w", err)
 	}
 
 	err = executeTargetSQL(ctx, config, wd, targetConn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute target sql: %w", err)
+		return "", fmt.Errorf("failed to execute target sql: %w", err)
 	}
 
 	if initial {
@@ -579,22 +461,20 @@ func generateMigrationStatements(
 		var input []byte
 		input, err = os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to read sql file: %w", err)
+			return "", fmt.Errorf("failed to read sql file: %w", err)
 		}
 
-		str := string(input)
-
-		return &str, nil
+		return string(input), nil
 	}
 
 	err = executeMigrateSQL(migrationsDir, migrateConn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute migrate sql: %w", err)
+		return "", fmt.Errorf("failed to execute migrate sql: %w", err)
 	}
 
 	statements, err := internal.Migra(internal.DSN(migrateConn, "disable"), internal.DSN(targetConn, "disable"))
 	if err != nil {
-		return nil, fmt.Errorf("failed to run migra: %w", err)
+		return "", fmt.Errorf("failed to run migra: %w", err)
 	}
 
 	// Filter stuff from go-migrate that doesn't exist in the target db, and we don't have and need anyway
@@ -621,9 +501,28 @@ func generateMigrationStatements(
 			lines = append(lines, line)
 		}
 	}
-	statements = strings.Join(lines, "\n") + "\n"
+	statements = strings.Join(lines, "\n")
 
-	return &statements, nil
+	extraStatements, err := generateMissingPermissionStatements(ctx, tmpDir, statements, targetConn, migrateConn)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate missing permission statements: %w", err)
+	}
+
+	var output string
+	if statements != "" {
+		output += statements
+	}
+	if statements != "" && extraStatements != "" {
+		output += "\n\n"
+	}
+	if extraStatements != "" {
+		output += "-- Statements generated automatically, please review:\n" + extraStatements
+	}
+	if output != "" {
+		output += "\n"
+	}
+
+	return output, nil
 }
 
 func executeMigrateSQL(migrationsDir string, migrateConn *pgx.Conn) error {
@@ -651,4 +550,74 @@ func executeTargetSQL(ctx context.Context, config *internal.Config, wd string, t
 	}
 
 	return nil
+}
+
+func generateMissingPermissionStatements(
+	ctx context.Context,
+	tmpDir,
+	statements string,
+	targetConn,
+	migrateConn *pgx.Conn,
+) (string, error) {
+	_, err := migrateConn.Exec(ctx, statements)
+	if err != nil {
+		return "", fmt.Errorf("failed to apply generated migration: %w", err)
+	}
+
+	pgDumpOptions := []string{
+		"--schema-only",
+		"--exclude-table=public.schema_migrations",
+	}
+
+	targetDump, err := internal.PgDump(internal.DSN(targetConn, "disable"), pgDumpOptions)
+	if err != nil {
+		//nolint:wrapcheck
+		return "", err
+	}
+
+	migrateDump, err := internal.PgDump(internal.DSN(migrateConn, "disable"), pgDumpOptions)
+	if err != nil {
+		//nolint:wrapcheck
+		return "", err
+	}
+
+	targetDumpFile := filepath.Join(tmpDir, "target.sql")
+	err = os.WriteFile(targetDumpFile, []byte(targetDump), 0o600)
+	if err != nil {
+		return "", fmt.Errorf("failed to write target.sql file: %w", err)
+	}
+
+	migrateDumpFile := filepath.Join(tmpDir, "migrate.sql")
+	err = os.WriteFile(migrateDumpFile, []byte(migrateDump), 0o600)
+	if err != nil {
+		return "", fmt.Errorf("failed to write migrate.sql file: %w", err)
+	}
+
+	diffCmd := exec.Command(
+		"diff",
+		"--minimal",
+		"--unchanged-line-format=",
+		"--old-line-format=",
+		"--new-line-format=%L",
+		migrateDumpFile,
+		targetDumpFile,
+	)
+	diffCmd.Stderr = os.Stderr
+
+	output, err := diffCmd.Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if !(errors.As(err, &ee) && ee.ExitCode() != 0) {
+			return "", fmt.Errorf("failed to run diff: %w %s", err, string(output))
+		}
+	}
+
+	var lines []string
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.HasPrefix(line, "ALTER ") {
+			lines = append(lines, line)
+		}
+	}
+
+	return strings.Join(lines, "\n"), nil
 }
