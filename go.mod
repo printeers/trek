@@ -3,6 +3,7 @@ module github.com/stack11/trek
 go 1.18
 
 require (
+	github.com/amenzhinsky/go-memexec v0.7.0
 	github.com/fergusstrange/embedded-postgres v1.17.0
 	github.com/golang-migrate/migrate/v4 v4.15.2
 	github.com/jackc/pgx/v4 v4.16.1
