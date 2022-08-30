@@ -1,4 +1,4 @@
-package cmd
+package internal
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ import (
 
 const envPrefix = "TREK"
 
-func initializeConfig(cmd *cobra.Command) {
+func InitializeFlags(cmd *cobra.Command) {
 	v := viper.New()
 	v.SetEnvPrefix(envPrefix)
 	v.AutomaticEnv()
@@ -27,9 +27,9 @@ func initializeConfig(cmd *cobra.Command) {
 	})
 }
 
-func markFlagRequired(cmd *cobra.Command, flag string) {
+func MarkFlagRequired(cmd *cobra.Command, flag string) {
 	err := cmd.MarkFlagRequired(flag)
 	if err != nil {
-		log.Fatalf("Failed to mark flag %s as required: %v\n", flag, err)
+		log.Fatalf("Failed to mark flag %q as required: %v\n", flag, err)
 	}
 }

@@ -31,12 +31,10 @@ func NewInitCommand() *cobra.Command {
 	initCmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create a new trek project",
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			initializeConfig(cmd)
-
-			return nil
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			internal.InitializeFlags(cmd)
 		},
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
 			var err error
@@ -48,7 +46,7 @@ func NewInitCommand() *cobra.Command {
 				}
 				version, err = trekVersionPrompt.Run()
 				if err != nil {
-					log.Fatalln(err)
+					return fmt.Errorf("failed to prompt version: %w", err)
 				}
 			}
 
@@ -58,7 +56,7 @@ func NewInitCommand() *cobra.Command {
 
 			if modelName != "" {
 				if err = validateModelName(modelName); err != nil {
-					log.Fatalln(err)
+					return fmt.Errorf("invalid model name %q: %w", modelName, err)
 				}
 			} else {
 				modelNamePrompt := promptui.Prompt{
@@ -67,13 +65,13 @@ func NewInitCommand() *cobra.Command {
 				}
 				modelName, err = modelNamePrompt.Run()
 				if err != nil {
-					log.Fatalln(err)
+					return fmt.Errorf("failed to prompt model name: %w", err)
 				}
 			}
 
 			if databaseName != "" {
 				if err = validateDatabaseName(databaseName); err != nil {
-					log.Fatalln(err)
+					return fmt.Errorf("invalid database name %q: %w", databaseName, err)
 				}
 			} else {
 				dbNamePrompt := promptui.Prompt{
@@ -82,14 +80,13 @@ func NewInitCommand() *cobra.Command {
 				}
 				databaseName, err = dbNamePrompt.Run()
 				if err != nil {
-					log.Fatalln(err)
+					return fmt.Errorf("failed to prompt database name: %w", err)
 				}
 			}
 
 			if databaseUsers != "" {
 				if err = validateDatabaseUsers(databaseUsers); err != nil {
-					fmt.Println("bla")
-					log.Fatalln(err)
+					return fmt.Errorf("invalid database users %q: %w", databaseUsers, err)
 				}
 			} else {
 				dbUsersPrompt := promptui.Prompt{
@@ -98,7 +95,7 @@ func NewInitCommand() *cobra.Command {
 				}
 				databaseUsers, err = dbUsersPrompt.Run()
 				if err != nil {
-					log.Fatalln(err)
+					return fmt.Errorf("failed to prompt database users: %w", err)
 				}
 			}
 
@@ -109,70 +106,59 @@ func NewInitCommand() *cobra.Command {
 				"db_users":     strings.Split(databaseUsers, ","),
 			}
 
-			err = writeTemplateFile(embed.DbmTmpl, fmt.Sprintf("%s.dbm", modelName), templateData)
-			if err != nil {
-				log.Fatalln(err)
-			}
-			err = writeTemplateFile(embed.DockerComposeYamlTmpl, "docker-compose.yaml", templateData)
-			if err != nil {
-				log.Fatalln(err)
-			}
-			err = writeTemplateFile(embed.DockerfileTmpl, "Dockerfile", templateData)
-			if err != nil {
-				log.Fatalln(err)
-			}
-			err = writeTemplateFile(embed.TrekYamlTmpl, "trek.yaml", templateData)
-			if err != nil {
-				log.Fatalln(err)
+			for file, tmpl := range map[string]string{
+				fmt.Sprintf("%s.dbm", modelName): embed.DbmTmpl,
+				"docker-compose.yaml":            embed.DockerComposeYamlTmpl,
+				"Dockerfile":                     embed.DockerfileTmpl,
+				"trek.yaml":                      embed.TrekYamlTmpl,
+			} {
+				err = writeTemplateFile(tmpl, file, templateData)
+				if err != nil {
+					return fmt.Errorf("failed to write %q: %w", file, err)
+				}
 			}
 
-			err = os.MkdirAll("migrations", 0o755)
-			if err != nil {
-				log.Fatalln(err)
-			}
-			err = os.MkdirAll("testdata", 0o755)
-			if err != nil {
-				log.Fatalln(err)
-			}
-			err = os.MkdirAll("hooks", 0o755)
-			if err != nil {
-				log.Fatalln(err)
+			for _, dir := range []string{"migrations", "testdata", "hooks"} {
+				err = os.MkdirAll(dir, 0o755)
+				if err != nil {
+					return fmt.Errorf("failed to create directory %q: %w", dir, err)
+				}
 			}
 
 			_, err = os.Create("testdata/001_0101-content.sql")
 			if err != nil {
-				log.Fatalln(err)
+				return fmt.Errorf("failed to create testdata file: %w", err)
 			}
 
-			err = writeSampleHook("apply-reset-pre")
-			if err != nil {
-				log.Fatalln(err)
-			}
-			err = writeSampleHook("apply-reset-post")
-			if err != nil {
-				log.Fatalln(err)
-			}
-			err = writeSampleHook("generate-migration-post", "echo \"Running on migration file $1\"")
-			if err != nil {
-				log.Fatalln(err)
+			for name, args := range map[string][]string{
+				"apply-reset-pre":         {},
+				"apply-reset-post":        {},
+				"generate-migration-post": {"echo \"Running on migration file $1\""},
+			} {
+				err = writeSampleHook(name, args...)
+				if err != nil {
+					return fmt.Errorf("failed to write hook %q: %w", name, err)
+				}
 			}
 
 			log.Println("New project created!")
 
 			config, err := internal.ReadConfig()
 			if err != nil {
-				log.Fatalf("Failed to read config: %v\n", err)
+				return fmt.Errorf("failed to read config: %w", err)
 			}
 
-			wd, wdErr := os.Getwd()
-			if wdErr != nil {
-				log.Fatalf("Failed to get working directory: %v\n", wdErr)
+			wd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("failed to get working directory: %w", err)
 			}
 
 			err = runWithFile(ctx, config, filepath.Join(wd, "migrations", "001_init.up.sql"), 1)
 			if err != nil {
-				log.Fatalln(err)
+				return fmt.Errorf("failed to generate first migration: %w", err)
 			}
+
+			return nil
 		},
 	}
 
@@ -215,7 +201,7 @@ func writeTemplateFile(ts, filename string, templateData map[string]interface{})
 	}
 	f, err := os.Create(filename)
 	if err != nil {
-		return fmt.Errorf("failed to create file %s: %w", filename, err)
+		return fmt.Errorf("failed to create file %q: %w", filename, err)
 	}
 	err = t.Execute(f, templateData)
 	if err != nil {
