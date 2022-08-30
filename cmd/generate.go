@@ -74,11 +74,16 @@ func NewGenerateCommand() *cobra.Command {
 				return fmt.Errorf("failed to read config: %w", err)
 			}
 
+			wd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("failed to get working directory: %w", err)
+			}
+
 			var runnerFunc func() error
 
 			if stdout {
 				var migrationsDir string
-				migrationsDir, err = getMigrationsDir()
+				migrationsDir, err = getMigrationsDir(wd)
 				if err != nil {
 					return fmt.Errorf("failed to get migrations directory: %w", err)
 				}
@@ -91,13 +96,13 @@ func NewGenerateCommand() *cobra.Command {
 				initial := migrationsCount == 0
 
 				runnerFunc = func() error {
-					return runWithStdout(ctx, config, initial)
+					return runWithStdout(ctx, config, wd, initial)
 				}
 			} else {
 				migrationName := args[0]
 				var newMigrationFilePath string
 				var migrationNumber uint
-				newMigrationFilePath, migrationNumber, err = getNewMigrationFilePath(migrationName, overwrite)
+				newMigrationFilePath, migrationNumber, err = getNewMigrationFilePath(wd, migrationName, overwrite)
 				if err != nil {
 					return fmt.Errorf("failed to get new migration file path: %w", err)
 				}
@@ -114,7 +119,7 @@ func NewGenerateCommand() *cobra.Command {
 				}()
 
 				runnerFunc = func() error {
-					return runWithFile(ctx, config, newMigrationFilePath, migrationNumber)
+					return runWithFile(ctx, config, wd, newMigrationFilePath, migrationNumber)
 				}
 			}
 
@@ -171,9 +176,10 @@ func setupDatabase(
 func runWithStdout(
 	ctx context.Context,
 	config *internal.Config,
+	wd string,
 	initial bool,
 ) error {
-	updated, err := checkIfUpdated(config)
+	updated, err := checkIfUpdated(config, wd)
 	if err != nil {
 		return fmt.Errorf("failed to check if model has been updated: %w", err)
 	}
@@ -208,6 +214,7 @@ func runWithStdout(
 		statements, err = generateMigrationStatements(
 			ctx,
 			config,
+			wd,
 			initial,
 			targetConn,
 			migrateConn,
@@ -228,11 +235,6 @@ func runWithStdout(
 		)
 		if err != nil {
 			return fmt.Errorf("failed to write temporary migration file: %w", err)
-		}
-
-		wd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("failed to get working directory: %w", err)
 		}
 
 		err = internal.RunHook(wd, "generate-migration-post", file.Name())
@@ -265,10 +267,11 @@ func runWithStdout(
 func runWithFile(
 	ctx context.Context,
 	config *internal.Config,
+	wd string,
 	newMigrationFilePath string,
 	migrationNumber uint,
 ) error {
-	updated, err := checkIfUpdated(config)
+	updated, err := checkIfUpdated(config, wd)
 	if err != nil {
 		return fmt.Errorf("failed to check if model has been updated: %w", err)
 	}
@@ -310,6 +313,7 @@ func runWithFile(
 		statements, err = generateMigrationStatements(
 			ctx,
 			config,
+			wd,
 			migrationNumber == 1,
 			targetConn,
 			migrateConn,
@@ -329,11 +333,6 @@ func runWithFile(
 		}
 		log.Println("Wrote migration file")
 
-		wd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("failed to get working directory: %w", err)
-		}
-
 		err = internal.RunHook(wd, "generate-migration-post", newMigrationFilePath)
 		if err != nil {
 			return fmt.Errorf("failed to run hook: %w", err)
@@ -344,7 +343,7 @@ func runWithFile(
 			return fmt.Errorf("failed to write template files: %w", err)
 		}
 
-		updated, err = generateDiffLockFile(ctx, newMigrationFilePath, targetConn, migrateConn)
+		updated, err = generateDiffLockFile(ctx, wd, newMigrationFilePath, targetConn, migrateConn)
 		if err != nil {
 			return fmt.Errorf("failed to generate diff lock file: %w", err)
 		}
@@ -357,12 +356,7 @@ func runWithFile(
 	return nil
 }
 
-func checkIfUpdated(config *internal.Config) (bool, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return false, fmt.Errorf("failed to get working directory: %w", err)
-	}
-
+func checkIfUpdated(config *internal.Config, wd string) (bool, error) {
 	m, err := os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName)))
 	if err != nil {
 		return false, fmt.Errorf("failed to read model file: %w", err)
@@ -380,6 +374,7 @@ func checkIfUpdated(config *internal.Config) (bool, error) {
 
 func generateDiffLockFile(
 	ctx context.Context,
+	wd string,
 	newMigrationFilePath string,
 	targetConn,
 	migrateConn *pgx.Conn,
@@ -397,12 +392,6 @@ func generateDiffLockFile(
 	diff, err = diffSchemaDumps(targetConn, migrateConn)
 	if err != nil {
 		return false, fmt.Errorf("failed to diff schema dumps: %w", err)
-	}
-
-	var wd string
-	wd, err = os.Getwd()
-	if err != nil {
-		return false, fmt.Errorf("failed to get working directory: %w", err)
 	}
 
 	lockfile := filepath.Join(wd, "diff.lock")
@@ -518,13 +507,9 @@ func writeTemplateFiles(config *internal.Config, newVersion uint) error {
 	return nil
 }
 
-func getMigrationsDir() (string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to get working directory: %w", err)
-	}
+func getMigrationsDir(wd string) (string, error) {
 	migrationsDir := filepath.Join(wd, "migrations")
-	if _, err = os.Stat(migrationsDir); os.IsNotExist(err) {
+	if _, err := os.Stat(migrationsDir); os.IsNotExist(err) {
 		err = os.Mkdir(migrationsDir, 0o755)
 		if err != nil {
 			return "", fmt.Errorf("failed to create migrations directory: %w", err)
@@ -534,12 +519,16 @@ func getMigrationsDir() (string, error) {
 	return migrationsDir, nil
 }
 
-func getNewMigrationFilePath(migrationName string, overwrite bool) (path string, migrationNumber uint, err error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to get working directory: %w", err)
-	}
-	migrationsDir, err := getMigrationsDir()
+func getNewMigrationFilePath(
+	wd string,
+	migrationName string,
+	overwrite bool,
+) (
+	path string,
+	migrationNumber uint,
+	err error,
+) {
+	migrationsDir, err := getMigrationsDir(wd)
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to get migrations directory: %w", err)
 	}
@@ -587,18 +576,14 @@ var (
 func generateMigrationStatements(
 	ctx context.Context,
 	config *internal.Config,
+	wd string,
 	initial bool,
 	targetConn,
 	migrateConn *pgx.Conn,
 ) (*string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get working directory: %w", err)
-	}
-
 	log.Println("Generating migration statements")
 
-	err = internal.PgModelerExportToFile(
+	err := internal.PgModelerExportToFile(
 		filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName)),
 		filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)),
 	)
@@ -626,7 +611,7 @@ func generateMigrationStatements(
 		return nil, fmt.Errorf("failed to create target users: %w", err)
 	}
 
-	err = executeTargetSQL(ctx, targetConn, config)
+	err = executeTargetSQL(ctx, config, wd, targetConn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute target sql: %w", err)
 	}
@@ -645,7 +630,7 @@ func generateMigrationStatements(
 		return &str, nil
 	}
 
-	err = executeMigrateSQL(migrateConn)
+	err = executeMigrateSQL(wd, migrateConn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute migrate sql: %w", err)
 	}
@@ -684,12 +669,7 @@ func generateMigrationStatements(
 	return &statements, nil
 }
 
-func executeMigrateSQL(migrateConn *pgx.Conn) error {
-	wd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
-	}
-
+func executeMigrateSQL(wd string, migrateConn *pgx.Conn) error {
 	m, err := migrate.New(fmt.Sprintf("file://%s", filepath.Join(wd, "migrations")), internal.DSN(migrateConn, "disable"))
 	if err != nil {
 		return fmt.Errorf("failed to create migrate: %w", err)
@@ -702,12 +682,7 @@ func executeMigrateSQL(migrateConn *pgx.Conn) error {
 	return nil
 }
 
-func executeTargetSQL(ctx context.Context, targetConn *pgx.Conn, config *internal.Config) error {
-	wd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
-	}
-
+func executeTargetSQL(ctx context.Context, config *internal.Config, wd string, targetConn *pgx.Conn) error {
 	targetSQL, err := os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)))
 	if err != nil {
 		return fmt.Errorf("failed to read target sql: %w", err)

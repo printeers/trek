@@ -153,7 +153,7 @@ func NewInitCommand() *cobra.Command {
 				return fmt.Errorf("failed to get working directory: %w", err)
 			}
 
-			err = runWithFile(ctx, config, filepath.Join(wd, "migrations", "001_init.up.sql"), 1)
+			err = runWithFile(ctx, config, wd, filepath.Join(wd, "migrations", "001_init.up.sql"), 1)
 			if err != nil {
 				return fmt.Errorf("failed to generate first migration: %w", err)
 			}
