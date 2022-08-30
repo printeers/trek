@@ -36,22 +36,20 @@ func NewApplyCommand() *cobra.Command {
 	applyCmd := &cobra.Command{
 		Use:   "apply",
 		Short: "Apply the migrations to a running database",
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			initializeConfig(cmd)
-
-			return nil
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			internal.InitializeFlags(cmd)
 		},
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
 			config, err := internal.ReadConfig()
 			if err != nil {
-				log.Fatalf("Failed to read config: %v\n", err)
+				return fmt.Errorf("failed to read config: %w", err)
 			}
 
 			wd, err := os.Getwd()
 			if err != nil {
-				log.Fatalf("Failed to get working directory: %v\n", err)
+				return fmt.Errorf("failed to get working directory: %w", err)
 			}
 
 			conn, err := pgx.Connect(ctx, fmt.Sprintf(
@@ -64,7 +62,7 @@ func NewApplyCommand() *cobra.Command {
 				postgresSSLMode,
 			))
 			if err != nil {
-				log.Fatalf("Unable to connect to database: %v", err)
+				return fmt.Errorf("failed to connect to database: %w", err)
 			}
 
 			if resetDatabase {
@@ -72,7 +70,7 @@ func NewApplyCommand() *cobra.Command {
 
 				err = internal.RunHook(wd, "apply-reset-pre")
 				if err != nil {
-					log.Fatalf("Failed to run hook: %v", err)
+					return fmt.Errorf("failed to run hook: %w", err)
 				}
 
 				_, err = conn.Exec(
@@ -80,48 +78,48 @@ func NewApplyCommand() *cobra.Command {
 					fmt.Sprintf("DROP DATABASE IF EXISTS %q WITH (FORCE)", config.DatabaseName),
 				)
 				if err != nil {
-					log.Fatalf("Failed to drop database: %v", err)
+					return fmt.Errorf("failed to drop database: %w", err)
 				}
 			}
 
 			databaseExists, err := internal.CheckDatabaseExists(ctx, conn, config.DatabaseName)
 			if err != nil {
-				log.Fatalf("Failed to check if database exists: %v", err)
+				return fmt.Errorf("failed to check if database exists: %w", err)
 			}
 			if !databaseExists {
 				_, err = conn.Exec(ctx, fmt.Sprintf("CREATE DATABASE %q", config.DatabaseName))
 				if err != nil {
-					log.Fatalf("Failed to create database: %v", err)
+					return fmt.Errorf("failed to create database: %w", err)
 				}
 			}
 
 			schemaMigrationsTableExists, err := internal.CheckTableExists(ctx, conn, "public", "schema_migrations")
 			if err != nil {
-				log.Fatalf("Failed to check if public.schema_migrations exists: %v", err)
+				return fmt.Errorf("failed to check if public.schema_migrations exists: %w", err)
 			}
 
 			if schemaMigrationsTableExists != databaseExists {
-				//nolint:lll
-				log.Fatalf("Something is wrong, the database and the schema_migrations table should always exist or not exist together!")
+				//nolint:lll,goerr113
+				return fmt.Errorf("something is wrong, the database and the schema_migrations table should always exist or not exist together")
 			}
 
 			for _, u := range config.DatabaseUsers {
 				var userExists bool
 				userExists, err = internal.CheckUserExists(ctx, conn, u)
 				if err != nil {
-					log.Fatalf("Failed to check if user exists: %v", err)
+					return fmt.Errorf("failed to check if user exists: %w", err)
 				}
 				if !userExists {
 					_, err = conn.Exec(ctx, fmt.Sprintf("CREATE ROLE %q WITH LOGIN", u))
 					if err != nil {
-						log.Fatalf("Failed to create user: %v", err)
+						return fmt.Errorf("failed to create user: %w", err)
 					}
 				}
 			}
 
 			err = conn.Close(ctx)
 			if err != nil {
-				log.Fatalf("Failed to close connection: %v", err)
+				return fmt.Errorf("failed to close database connection: %w", err)
 			}
 
 			dsn := fmt.Sprintf(
@@ -136,34 +134,34 @@ func NewApplyCommand() *cobra.Command {
 
 			m, err := migrate.New(fmt.Sprintf("file://%s", filepath.Join(wd, "migrations")), dsn)
 			if err != nil {
-				log.Fatalln(err)
+				return fmt.Errorf("failed to initialize go-migrate: %w", err)
 			}
 
 			if resetDatabase || (!databaseExists && !schemaMigrationsTableExists) {
 				var files []os.DirEntry
 				files, err = os.ReadDir(filepath.Join(wd, "migrations"))
 				if err != nil {
-					log.Fatalln(err)
+					return fmt.Errorf("failed to read migrations: %w", err)
 				}
 
 				for index, file := range files {
-					log.Printf("Running migration %s\n", file.Name())
+					log.Printf("Applying migration %q\n", file.Name())
 					err = m.Steps(1)
 					if errors.Is(err, migrate.ErrNoChange) {
 						log.Println("No changes!")
 					} else if err != nil {
-						log.Fatalln(err)
+						return fmt.Errorf("failed to apply migration %q: %w", file.Name(), err)
 					}
 					if insertTestData {
 						err = filepath.Walk(filepath.Join(wd, "testdata"), func(p string, info fs.FileInfo, err error) error {
 							if strings.HasPrefix(path.Base(p), fmt.Sprintf("%03d", index+1)) {
-								log.Printf("Inserting test data %s\n", path.Base(p))
+								log.Printf("Inserting testdata %q\n", path.Base(p))
 
 								// We have to use psql, because users might use commands like "\copy"
 								// which don't work by directly connecting to the database
 								err := internal.PsqlFile(dsn, p)
 								if err != nil {
-									return fmt.Errorf("failed to apply test data: %w", err)
+									return fmt.Errorf("failed to insert testdata: %w", err)
 								}
 
 								return nil
@@ -172,42 +170,44 @@ func NewApplyCommand() *cobra.Command {
 							return nil
 						})
 						if err != nil {
-							log.Fatalf("Failed to run testdata: %v\n", err)
+							return fmt.Errorf("failed to run testdata: %w", err)
 						}
 					}
 				}
 
 				err = internal.RunHook(wd, "apply-reset-post")
 				if err != nil {
-					log.Fatalf("Failed to run hook: %v", err)
+					return fmt.Errorf("failed to run hook: %w", err)
 				}
 			} else {
 				err = m.Up()
 				if errors.Is(err, migrate.ErrNoChange) {
 					log.Println("No changes!")
 				} else if err != nil {
-					log.Fatalln(err)
+					return fmt.Errorf("failed to apply migrations: %w", err)
 				}
 			}
 
 			conn, err = pgx.Connect(ctx, dsn)
 			if err != nil {
-				log.Fatalf("Unable to connect to database: %v", err)
+				return fmt.Errorf("failed to connect to database: %w", err)
 			}
 
 			for _, u := range config.DatabaseUsers {
 				_, err = conn.Exec(ctx, fmt.Sprintf("GRANT SELECT ON public.schema_migrations TO %q", u))
 				if err != nil {
-					log.Fatalf("Failed to grant select permission on schema_migrations to %q: %v", u, err)
+					return fmt.Errorf("failed to grant select permission on schema_migrations to %q: %w", u, err)
 				}
 			}
 
 			err = conn.Close(ctx)
 			if err != nil {
-				log.Fatalf("Failed to close connection: %v", err)
+				return fmt.Errorf("failed to close database connection: %w", err)
 			}
 
 			log.Println("Successfully migrated database")
+
+			return nil
 		},
 	}
 
@@ -217,11 +217,11 @@ func NewApplyCommand() *cobra.Command {
 	applyCmd.Flags().StringVar(&postgresPassword, "postgres-password", "", "Password of the PostgreSQL database")
 	applyCmd.Flags().StringVar(&postgresSSLMode, "postgres-sslmode", "disable", "SSL Mode of the PostgreSQL database")
 	applyCmd.Flags().BoolVar(&resetDatabase, "reset-database", false, "Reset the database before applying migrations")
-	applyCmd.Flags().BoolVar(&insertTestData, "insert-test-data", false, "Insert the test data of each migration after the individual migrations has been applied") //nolint:lll
-	markFlagRequired(applyCmd, "postgres-host")
-	markFlagRequired(applyCmd, "postgres-port")
-	markFlagRequired(applyCmd, "postgres-user")
-	markFlagRequired(applyCmd, "postgres-password")
+	applyCmd.Flags().BoolVar(&insertTestData, "insert-test-data", false, "Insert the testdata of each migration after the individual migrations has been applied") //nolint:lll
+	internal.MarkFlagRequired(applyCmd, "postgres-host")
+	internal.MarkFlagRequired(applyCmd, "postgres-port")
+	internal.MarkFlagRequired(applyCmd, "postgres-user")
+	internal.MarkFlagRequired(applyCmd, "postgres-password")
 
 	return applyCmd
 }

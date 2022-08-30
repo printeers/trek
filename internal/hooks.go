@@ -12,12 +12,12 @@ func RunHook(wd, hookName string, args ...string) error {
 	hooksDir := filepath.Join(wd, "hooks")
 	filePath := filepath.Join(hooksDir, hookName)
 	if _, err := os.Stat(filePath); errors.Is(err, os.ErrNotExist) {
-		log.Printf("Skipping hook %s", hookName)
+		log.Printf("Skipping hook %q", hookName)
 
 		return nil
 	}
 
-	log.Printf("Running hook %s", hookName)
+	log.Printf("Running hook %q", hookName)
 
 	cmd := exec.Command(filePath, args...)
 	cmd.Dir = hooksDir
