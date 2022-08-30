@@ -37,7 +37,10 @@ func NewInitCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
-			var err error
+			wd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("failed to get working directory: %w", err)
+			}
 
 			if version == "" {
 				trekVersionPrompt := promptui.Prompt{
@@ -125,7 +128,7 @@ func NewInitCommand() *cobra.Command {
 				}
 			}
 
-			_, err = os.Create("testdata/001_0101-content.sql")
+			_, err = os.Create(filepath.Join(wd, "testdata", "001_0101-content.sql"))
 			if err != nil {
 				return fmt.Errorf("failed to create testdata file: %w", err)
 			}
@@ -135,7 +138,7 @@ func NewInitCommand() *cobra.Command {
 				"apply-reset-post":        {},
 				"generate-migration-post": {"echo \"Running on migration file $1\""},
 			} {
-				err = writeSampleHook(name, args...)
+				err = writeSampleHook(wd, name, args...)
 				if err != nil {
 					return fmt.Errorf("failed to write hook %q: %w", name, err)
 				}
@@ -143,17 +146,17 @@ func NewInitCommand() *cobra.Command {
 
 			log.Println("New project created!")
 
-			config, err := internal.ReadConfig()
+			config, err := internal.ReadConfig(wd)
 			if err != nil {
 				return fmt.Errorf("failed to read config: %w", err)
 			}
 
-			wd, err := os.Getwd()
+			migrationsDir, err := internal.GetMigrationsDir(wd)
 			if err != nil {
-				return fmt.Errorf("failed to get working directory: %w", err)
+				return fmt.Errorf("failed to get migrations directory: %w", err)
 			}
 
-			err = runWithFile(ctx, config, wd, filepath.Join(wd, "migrations", "001_init.up.sql"), 1)
+			err = runWithFile(ctx, config, wd, migrationsDir, filepath.Join(migrationsDir, "001_init.up.sql"), 1)
 			if err != nil {
 				return fmt.Errorf("failed to generate first migration: %w", err)
 			}
@@ -211,7 +214,7 @@ func writeTemplateFile(ts, filename string, templateData map[string]interface{})
 	return nil
 }
 
-func writeSampleHook(name string, extraLines ...string) error {
+func writeSampleHook(wd, name string, extraLines ...string) error {
 	lines := []string{
 		"#!/bin/bash",
 		"set -euxo pipefail",
@@ -225,5 +228,9 @@ func writeSampleHook(name string, extraLines ...string) error {
 	lines = append(lines, "")
 
 	//nolint:gosec,wrapcheck
-	return os.WriteFile(fmt.Sprintf("hooks/%s.sample", name), []byte(strings.Join(lines, "\n")), 0o755)
+	return os.WriteFile(
+		filepath.Join(wd, "hooks", fmt.Sprintf("%s.sample", name)),
+		[]byte(strings.Join(lines, "\n")),
+		0o755,
+	)
 }

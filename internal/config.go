@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 
 	"gopkg.in/yaml.v2"
@@ -30,9 +31,9 @@ type template struct {
 	Content string `yaml:"content"`
 }
 
-func ReadConfig() (*Config, error) {
+func ReadConfig(wd string) (*Config, error) {
 	var config *Config
-	file, err := os.ReadFile("trek.yaml")
+	file, err := os.ReadFile(filepath.Join(wd, "trek.yaml"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
