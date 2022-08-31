@@ -33,29 +33,9 @@ func GetMigrationFileName(migrationNumber uint, migrationName string) string {
 	return fmt.Sprintf("%03d_%s.up.sql", migrationNumber, migrationName)
 }
 
-func InspectMigrations(migrationsDir string) (migrationsCount uint, err error) {
-	err = filepath.WalkDir(migrationsDir, func(path string, d fs.DirEntry, err error) error {
-		if path == migrationsDir {
-			return nil
-		}
-		if d.IsDir() {
-			return filepath.SkipDir
-		}
-		if !RegexpMigrationFileName.MatchString(d.Name()) {
-			//nolint:goerr113
-			return fmt.Errorf("invalid existing migration filename %q", d.Name())
-		}
-		migrationsCount++
-
-		return nil
-	})
-
-	//nolint:wrapcheck
-	return migrationsCount, err
-}
-
 func GetNewMigrationFilePath(
 	migrationsDir string,
+	migrationsCount uint,
 	migrationName string,
 	overwrite bool,
 ) (
@@ -63,11 +43,6 @@ func GetNewMigrationFilePath(
 	migrationNumber uint,
 	err error,
 ) {
-	migrationsCount, err := InspectMigrations(migrationsDir)
-	if err != nil {
-		return "", 0, fmt.Errorf("failed to inspect migrations directory: %w", err)
-	}
-
 	var migrationsNumber uint
 	if _, err = os.Stat(
 		filepath.Join(migrationsDir, GetMigrationFileName(migrationsCount, migrationName)),
@@ -92,4 +67,31 @@ func GetNewMigrationFilePath(
 	}
 
 	return filepath.Join(migrationsDir, GetMigrationFileName(migrationsNumber, migrationName)), migrationsNumber, nil
+}
+
+func FindMigrations(migrationsDir string, strict bool) ([]string, error) {
+	var files []string
+
+	err := filepath.WalkDir(migrationsDir, func(path string, d fs.DirEntry, err error) error {
+		if path == migrationsDir {
+			return nil
+		}
+		if d.IsDir() {
+			return filepath.SkipDir
+		}
+
+		if strict {
+			if !RegexpMigrationFileName.MatchString(d.Name()) {
+				//nolint:goerr113
+				return fmt.Errorf("invalid migration file name %q", d.Name())
+			}
+		}
+
+		files = append(files, d.Name())
+
+		return nil
+	})
+
+	//nolint:wrapcheck
+	return files, err
 }

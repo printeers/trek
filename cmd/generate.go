@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"text/template"
 	"time"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
@@ -27,6 +26,7 @@ func NewGenerateCommand() *cobra.Command {
 		cleanup   bool
 		overwrite bool
 		stdout    bool
+		check     bool
 	)
 
 	generateCmd := &cobra.Command{
@@ -71,25 +71,46 @@ func NewGenerateCommand() *cobra.Command {
 				return fmt.Errorf("failed to read config: %w", err)
 			}
 
-			var migrationsDir string
-			migrationsDir, err = internal.GetMigrationsDir(wd)
+			migrationsDir, err := internal.GetMigrationsDir(wd)
 			if err != nil {
 				return fmt.Errorf("failed to get migrations directory: %w", err)
 			}
 
-			var runnerFunc func() error
+			migrationFiles, err := internal.FindMigrations(migrationsDir, true)
+			if err != nil {
+				return fmt.Errorf("failed to find migrations: %w", err)
+			}
+
+			var initialFunc, continuousFunc func() error
 
 			if stdout {
-				var migrationsCount uint
-				migrationsCount, err = internal.InspectMigrations(migrationsDir)
-				if err != nil {
-					return fmt.Errorf("failed to get inspect migrations directory: %w", err)
+				initialFunc = func() error {
+					var tmpDir string
+					tmpDir, err = os.MkdirTemp("", "trek-")
+					if err != nil {
+						return fmt.Errorf("failed to create temporary directory: %w", err)
+					}
+					defer os.RemoveAll(tmpDir)
+
+					if check {
+						err = checkAll(ctx, config, wd, tmpDir, migrationsDir)
+						if err != nil {
+							return err
+						}
+					}
+
+					return runWithStdout(ctx, config, wd, tmpDir, migrationsDir, len(migrationFiles) == 0)
 				}
 
-				initial := migrationsCount == 0
+				continuousFunc = func() error {
+					var tmpDir string
+					tmpDir, err = os.MkdirTemp("", "trek-")
+					if err != nil {
+						return fmt.Errorf("failed to create temporary directory: %w", err)
+					}
+					defer os.RemoveAll(tmpDir)
 
-				runnerFunc = func() error {
-					return runWithStdout(ctx, config, wd, migrationsDir, initial)
+					return runWithStdout(ctx, config, wd, tmpDir, migrationsDir, len(migrationFiles) == 0)
 				}
 			} else {
 				migrationName := args[0]
@@ -97,6 +118,7 @@ func NewGenerateCommand() *cobra.Command {
 				var migrationNumber uint
 				newMigrationFilePath, migrationNumber, err = internal.GetNewMigrationFilePath(
 					migrationsDir,
+					uint(len(migrationFiles)),
 					migrationName,
 					overwrite,
 				)
@@ -115,12 +137,35 @@ func NewGenerateCommand() *cobra.Command {
 					}
 				}()
 
-				runnerFunc = func() error {
-					return runWithFile(ctx, config, wd, migrationsDir, newMigrationFilePath, migrationNumber)
+				initialFunc = func() error {
+					var tmpDir string
+					tmpDir, err = os.MkdirTemp("", "trek-")
+					if err != nil {
+						return fmt.Errorf("failed to create temporary directory: %w", err)
+					}
+					defer os.RemoveAll(tmpDir)
+
+					var updated bool
+					updated, err = runWithFile(ctx, config, wd, tmpDir, migrationsDir, newMigrationFilePath, migrationNumber)
+					if err != nil {
+						return err
+					}
+
+					if updated && check {
+						err = checkAll(ctx, config, wd, tmpDir, migrationsDir)
+						if err != nil {
+							return err
+						}
+
+						log.Println("Done checking")
+					}
+
+					return nil
 				}
+				continuousFunc = initialFunc
 			}
 
-			err = runnerFunc()
+			err = initialFunc()
 			if err != nil {
 				log.Printf("Failed to run: %v\n", err)
 			}
@@ -128,7 +173,7 @@ func NewGenerateCommand() *cobra.Command {
 			if dev {
 				for {
 					time.Sleep(time.Millisecond * 100)
-					err = runnerFunc()
+					err = continuousFunc()
 					if err != nil {
 						log.Printf("Failed to run: %v\n", err)
 					}
@@ -143,6 +188,7 @@ func NewGenerateCommand() *cobra.Command {
 	generateCmd.Flags().BoolVar(&cleanup, "cleanup", true, "Remove the generated migrations file. Only works with --dev")
 	generateCmd.Flags().BoolVar(&overwrite, "overwrite", false, "Overwrite existing files")
 	generateCmd.Flags().BoolVar(&stdout, "stdout", false, "Output migration statements to stdout")
+	generateCmd.Flags().BoolVar(&check, "check", true, "Run checks after generating the migration")
 
 	return generateCmd
 }
@@ -155,20 +201,21 @@ func setupDatabase(
 ) (
 	*embeddedpostgres.EmbeddedPostgres,
 	*pgx.Conn,
+	string,
 	error,
 ) {
 	postgres, dsn := internal.NewPostgresDatabase(filepath.Join(tmpDir, name), port)
 	err := postgres.Start()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to start %q database: %w", name, err)
+		return nil, nil, "", fmt.Errorf("failed to start %q database: %w", name, err)
 	}
 
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to connect to %q database: %w", name, err)
+		return nil, nil, "", fmt.Errorf("failed to connect to %q database: %w", name, err)
 	}
 
-	return postgres, conn, nil
+	return postgres, conn, dsn, nil
 }
 
 //nolint:gocognit,cyclop
@@ -176,6 +223,7 @@ func runWithStdout(
 	ctx context.Context,
 	config *internal.Config,
 	wd,
+	tmpDir,
 	migrationsDir string,
 	initial bool,
 ) error {
@@ -184,13 +232,7 @@ func runWithStdout(
 		return fmt.Errorf("failed to check if model has been updated: %w", err)
 	}
 	if updated {
-		tmpDir, err := os.MkdirTemp("", "trek-")
-		if err != nil {
-			return fmt.Errorf("failed to create temporary directory: %w", err)
-		}
-		defer os.RemoveAll(tmpDir)
-
-		targetPostgres, targetConn, err := setupDatabase(ctx, tmpDir, "target", 5432)
+		targetPostgres, targetConn, _, err := setupDatabase(ctx, tmpDir, "target", 5432)
 		defer func() {
 			if targetConn != nil {
 				_ = targetConn.Close(ctx)
@@ -203,7 +245,7 @@ func runWithStdout(
 			return fmt.Errorf("failed to setup target database: %w", err)
 		}
 
-		migratePostgres, migrateConn, err := setupDatabase(ctx, tmpDir, "migrate", 5433)
+		migratePostgres, migrateConn, _, err := setupDatabase(ctx, tmpDir, "migrate", 5433)
 		defer func() {
 			if migrateConn != nil {
 				_ = migrateConn.Close(ctx)
@@ -244,7 +286,9 @@ func runWithStdout(
 			return fmt.Errorf("failed to write temporary migration file: %w", err)
 		}
 
-		err = internal.RunHook(wd, "generate-migration-post", file.Name())
+		err = internal.RunHook(wd, "generate-migration-post", &internal.HookOptions{
+			Args: []string{file.Name()},
+		})
 		if err != nil {
 			return fmt.Errorf("failed to run hook: %w", err)
 		}
@@ -274,29 +318,24 @@ func runWithFile(
 	ctx context.Context,
 	config *internal.Config,
 	wd,
+	tmpDir,
 	migrationsDir,
 	newMigrationFilePath string,
 	migrationNumber uint,
-) error {
+) (bool, error) {
 	updated, err := checkIfUpdated(config, wd)
 	if err != nil {
-		return fmt.Errorf("failed to check if model has been updated: %w", err)
+		return false, fmt.Errorf("failed to check if model has been updated: %w", err)
 	}
 	if updated {
 		if _, err = os.Stat(newMigrationFilePath); err == nil {
 			err = os.Remove(newMigrationFilePath)
 			if err != nil {
-				return fmt.Errorf("failed to delete generated migration file: %w", err)
+				return false, fmt.Errorf("failed to delete generated migration file: %w", err)
 			}
 		}
 
-		tmpDir, err := os.MkdirTemp("", "trek-")
-		if err != nil {
-			return fmt.Errorf("failed to create temporary directory: %w", err)
-		}
-		defer os.RemoveAll(tmpDir)
-
-		targetPostgres, targetConn, err := setupDatabase(ctx, tmpDir, "target", 5432)
+		targetPostgres, targetConn, _, err := setupDatabase(ctx, tmpDir, "target", 5432)
 		defer func() {
 			if targetConn != nil {
 				_ = targetConn.Close(ctx)
@@ -306,10 +345,10 @@ func runWithFile(
 			}
 		}()
 		if err != nil {
-			return fmt.Errorf("failed to setup target database: %w", err)
+			return false, fmt.Errorf("failed to setup target database: %w", err)
 		}
 
-		migratePostgres, migrateConn, err := setupDatabase(ctx, tmpDir, "migrate", 5433)
+		migratePostgres, migrateConn, _, err := setupDatabase(ctx, tmpDir, "migrate", 5433)
 		defer func() {
 			if migrateConn != nil {
 				_ = migrateConn.Close(ctx)
@@ -319,7 +358,7 @@ func runWithFile(
 			}
 		}()
 		if err != nil {
-			return fmt.Errorf("failed to setup migrate database: %w", err)
+			return false, fmt.Errorf("failed to setup migrate database: %w", err)
 		}
 
 		statements, err := generateMigrationStatements(
@@ -333,7 +372,7 @@ func runWithFile(
 			migrateConn,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to generate migration statements: %w", err)
+			return false, fmt.Errorf("failed to generate migration statements: %w", err)
 		}
 
 		//nolint:gosec
@@ -343,22 +382,26 @@ func runWithFile(
 			0o644,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to write migration file: %w", err)
+			return false, fmt.Errorf("failed to write migration file: %w", err)
 		}
 		log.Println("Wrote migration file")
 
-		err = internal.RunHook(wd, "generate-migration-post", newMigrationFilePath)
+		err = internal.RunHook(wd, "generate-migration-post", &internal.HookOptions{
+			Args: []string{newMigrationFilePath},
+		})
 		if err != nil {
-			return fmt.Errorf("failed to run hook: %w", err)
+			return false, fmt.Errorf("failed to run hook: %w", err)
 		}
 
 		err = writeTemplateFiles(config, migrationNumber)
 		if err != nil {
-			return fmt.Errorf("failed to write template files: %w", err)
+			return false, fmt.Errorf("failed to write template files: %w", err)
 		}
+
+		return true, nil
 	}
 
-	return nil
+	return false, nil
 }
 
 func checkIfUpdated(config *internal.Config, wd string) (bool, error) {
@@ -379,25 +422,20 @@ func checkIfUpdated(config *internal.Config, wd string) (bool, error) {
 
 func writeTemplateFiles(config *internal.Config, newVersion uint) error {
 	for _, ts := range config.Templates {
-		t, err := template.New(ts.Path).Parse(ts.Content)
-		if err != nil {
-			return fmt.Errorf("failed to parse template: %w", err)
-		}
-
 		dir := filepath.Dir(ts.Path)
-		err = os.MkdirAll(dir, 0o755)
+		err := os.MkdirAll(dir, 0o755)
 		if err != nil {
 			return fmt.Errorf("failed to create %q: %w", dir, err)
 		}
 
-		f, err := os.Create(ts.Path)
-		if err != nil {
-			return fmt.Errorf("failed to create file %q: %w", ts.Path, err)
-		}
-
-		err = t.Execute(f, map[string]interface{}{"NewVersion": newVersion})
+		data, err := internal.ExecuteConfigTemplate(ts, newVersion)
 		if err != nil {
 			return fmt.Errorf("failed to execute template: %w", err)
+		}
+
+		err = os.WriteFile(ts.Path, []byte(*data), 0o600)
+		if err != nil {
+			return fmt.Errorf("failed to write file: %w", err)
 		}
 	}
 

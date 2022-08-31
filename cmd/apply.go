@@ -68,7 +68,7 @@ func NewApplyCommand() *cobra.Command {
 			if resetDatabase {
 				log.Println("Resetting database")
 
-				err = internal.RunHook(wd, "apply-reset-pre")
+				err = internal.RunHook(wd, "apply-reset-pre", nil)
 				if err != nil {
 					return fmt.Errorf("failed to run hook: %w", err)
 				}
@@ -133,19 +133,19 @@ func NewApplyCommand() *cobra.Command {
 			}
 
 			if resetDatabase || !databaseExists {
-				var files []os.DirEntry
-				files, err = os.ReadDir(migrationsDir)
+				var migrationFiles []string
+				migrationFiles, err = internal.FindMigrations(migrationsDir, true)
 				if err != nil {
 					return fmt.Errorf("failed to read migrations: %w", err)
 				}
 
-				for index, file := range files {
-					log.Printf("Applying migration %q\n", file.Name())
+				for index, file := range migrationFiles {
+					log.Printf("Applying migration %q\n", file)
 					err = m.Steps(1)
 					if errors.Is(err, migrate.ErrNoChange) {
 						log.Println("No changes!")
 					} else if err != nil {
-						return fmt.Errorf("failed to apply migration %q: %w", file.Name(), err)
+						return fmt.Errorf("failed to apply migration %q: %w", file, err)
 					}
 					if insertTestData {
 						err = filepath.Walk(filepath.Join(wd, "testdata"), func(p string, info fs.FileInfo, err error) error {
@@ -170,7 +170,7 @@ func NewApplyCommand() *cobra.Command {
 					}
 				}
 
-				err = internal.RunHook(wd, "apply-reset-post")
+				err = internal.RunHook(wd, "apply-reset-post", nil)
 				if err != nil {
 					return fmt.Errorf("failed to run hook: %w", err)
 				}

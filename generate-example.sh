@@ -10,3 +10,5 @@ TREK_MODEL_NAME=foo \
 TREK_DATABASE_NAME=bar \
 TREK_DATABASE_USERS=alice,bob \
 go run .. init
+
+go run .. check
