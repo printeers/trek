@@ -9,6 +9,7 @@ func NewRootCommand() *cobra.Command {
 	}
 
 	rootCmd.AddCommand(NewApplyCommand())
+	rootCmd.AddCommand(NewCheckCommand())
 	rootCmd.AddCommand(NewGenerateCommand())
 	rootCmd.AddCommand(NewInitCommand())
 

@@ -23,10 +23,10 @@ type Config struct {
 	DatabaseName string `yaml:"db_name"`
 	//nolint:tagliatelle
 	DatabaseUsers []string   `yaml:"db_users"`
-	Templates     []template `yaml:"templates"`
+	Templates     []Template `yaml:"templates"`
 }
 
-type template struct {
+type Template struct {
 	Path    string `yaml:"path"`
 	Content string `yaml:"content"`
 }
