@@ -16,5 +16,8 @@ FROM alpine:latest
 RUN apk add postgresql-client bash
 COPY --from=build /trek/dist/bin/trek /usr/local/bin/trek
 
+RUN adduser -D -u 1001 unprivileged
+USER unprivileged
+
 WORKDIR /data
 CMD ["/usr/local/bin/trek", "apply"]
