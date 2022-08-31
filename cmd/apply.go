@@ -93,16 +93,6 @@ func NewApplyCommand() *cobra.Command {
 				}
 			}
 
-			schemaMigrationsTableExists, err := internal.CheckTableExists(ctx, conn, "public", "schema_migrations")
-			if err != nil {
-				return fmt.Errorf("failed to check if public.schema_migrations exists: %w", err)
-			}
-
-			if schemaMigrationsTableExists != databaseExists {
-				//nolint:lll,goerr113
-				return fmt.Errorf("something is wrong, the database and the schema_migrations table should always exist or not exist together")
-			}
-
 			for _, u := range config.DatabaseUsers {
 				var userExists bool
 				userExists, err = internal.CheckUserExists(ctx, conn, u)
@@ -142,7 +132,7 @@ func NewApplyCommand() *cobra.Command {
 				return fmt.Errorf("failed to initialize go-migrate: %w", err)
 			}
 
-			if resetDatabase || (!databaseExists && !schemaMigrationsTableExists) {
+			if resetDatabase || !databaseExists {
 				var files []os.DirEntry
 				files, err = os.ReadDir(migrationsDir)
 				if err != nil {
