@@ -160,14 +160,14 @@ func NewInitCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("failed to create temporary directory: %w", err)
 			}
-			defer os.RemoveAll(tmpDir)
 
 			_, err = runWithFile(ctx, config, wd, tmpDir, migrationsDir, filepath.Join(migrationsDir, "001_init.up.sql"), 1)
 			if err != nil {
 				return fmt.Errorf("failed to generate first migration: %w", err)
 			}
 
-			return nil
+			//nolint:wrapcheck
+			return os.RemoveAll(tmpDir)
 		},
 	}
 

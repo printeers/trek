@@ -52,9 +52,14 @@ func NewCheckCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("failed to create temporary directory: %w", err)
 			}
-			defer os.RemoveAll(tmpDir)
 
-			return checkAll(ctx, config, wd, tmpDir, migrationsDir)
+			err = checkAll(ctx, config, wd, tmpDir, migrationsDir)
+			if err != nil {
+				return err
+			}
+
+			//nolint:wrapcheck
+			return os.RemoveAll(tmpDir)
 		},
 	}
 

@@ -90,7 +90,6 @@ func NewGenerateCommand() *cobra.Command {
 					if err != nil {
 						return fmt.Errorf("failed to create temporary directory: %w", err)
 					}
-					defer os.RemoveAll(tmpDir)
 
 					if check {
 						err = checkAll(ctx, config, wd, tmpDir, migrationsDir)
@@ -99,7 +98,13 @@ func NewGenerateCommand() *cobra.Command {
 						}
 					}
 
-					return runWithStdout(ctx, config, wd, tmpDir, migrationsDir, len(migrationFiles) == 0)
+					err = runWithStdout(ctx, config, wd, tmpDir, migrationsDir, len(migrationFiles) == 0)
+					if err != nil {
+						return err
+					}
+
+					//nolint:wrapcheck
+					return os.RemoveAll(tmpDir)
 				}
 
 				continuousFunc = func() error {
@@ -108,9 +113,14 @@ func NewGenerateCommand() *cobra.Command {
 					if err != nil {
 						return fmt.Errorf("failed to create temporary directory: %w", err)
 					}
-					defer os.RemoveAll(tmpDir)
 
-					return runWithStdout(ctx, config, wd, tmpDir, migrationsDir, len(migrationFiles) == 0)
+					err = runWithStdout(ctx, config, wd, tmpDir, migrationsDir, len(migrationFiles) == 0)
+					if err != nil {
+						return err
+					}
+
+					//nolint:wrapcheck
+					return os.RemoveAll(tmpDir)
 				}
 			} else {
 				migrationName := args[0]
@@ -143,7 +153,6 @@ func NewGenerateCommand() *cobra.Command {
 					if err != nil {
 						return fmt.Errorf("failed to create temporary directory: %w", err)
 					}
-					defer os.RemoveAll(tmpDir)
 
 					var updated bool
 					updated, err = runWithFile(ctx, config, wd, tmpDir, migrationsDir, newMigrationFilePath, migrationNumber)
@@ -160,7 +169,8 @@ func NewGenerateCommand() *cobra.Command {
 						log.Println("Done checking")
 					}
 
-					return nil
+					//nolint:wrapcheck
+					return os.RemoveAll(tmpDir)
 				}
 				continuousFunc = initialFunc
 			}
