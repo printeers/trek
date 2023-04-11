@@ -1,4 +1,4 @@
-module github.com/stack11/trek
+module github.com/printeers/trek
 
 go 1.18
 

@@ -27,3 +27,7 @@ Use the `--dev` flag to continuously watch for file changes.
 ## Applying the migrations
 
 Take a look at the `example/` directory.
+
+## History
+
+`trek` was originally developed by [Stack11](https://github.com/stack11). In april 2023 [Printeers](https://printeers.com) adopted the project for further development and maintenance.

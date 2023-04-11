@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/stack11/trek/cmd"
+	"github.com/printeers/trek/cmd"
 )
 
 func main() {

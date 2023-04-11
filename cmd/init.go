@@ -12,8 +12,9 @@ import (
 
 	"github.com/manifoldco/promptui"
 	"github.com/spf13/cobra"
-	"github.com/stack11/trek/internal"
-	"github.com/stack11/trek/internal/embed"
+
+	"github.com/printeers/trek/internal"
+	"github.com/printeers/trek/internal/embed"
 )
 
 var errInvalidModelName = errors.New("invalid model name")

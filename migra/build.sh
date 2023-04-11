@@ -3,8 +3,8 @@ set -euxo pipefail
 
 cd "$(dirname "$0")/.."
 
-docker build -t ghcr.io/stack11/trek/migra:latest - < migra/Dockerfile
-id="$(docker run --rm -d ghcr.io/stack11/trek/migra:latest sleep infinity)"
+docker build -t ghcr.io/printeers/trek/migra:latest - < migra/Dockerfile
+id="$(docker run --rm -d ghcr.io/printeers/trek/migra:latest sleep infinity)"
 function cleanup() {
     docker kill "$id" > /dev/null 2>&1 || true
 }

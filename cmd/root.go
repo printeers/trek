@@ -5,7 +5,7 @@ import "github.com/spf13/cobra"
 func NewRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "trek",
-		Short: "A tool to do automatic database migrations created by Stack11",
+		Short: "A tool to create, organize and run database migrations.",
 	}
 
 	rootCmd.AddCommand(NewApplyCommand())

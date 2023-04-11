@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/stack11/trek/internal/embed"
+	"github.com/printeers/trek/internal/embed"
 )
 
 func Migra(from, to string) (string, error) {

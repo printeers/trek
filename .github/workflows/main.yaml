@@ -44,4 +44,4 @@ jobs:
           context: .
           pull: true
           push: ${{ github.ref == 'refs/heads/main' }}
-          tags: ghcr.io/stack11/trek:latest
+          tags: ghcr.io/printeers/trek:latest

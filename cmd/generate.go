@@ -16,7 +16,7 @@ import (
 	"github.com/jackc/pgx/v4"
 	"github.com/spf13/cobra"
 
-	"github.com/stack11/trek/internal"
+	"github.com/printeers/trek/internal"
 )
 
 //nolint:gocognit,cyclop

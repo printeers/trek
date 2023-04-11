@@ -19,8 +19,8 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/spf13/cobra"
 
-	"github.com/stack11/trek/internal"
-	"github.com/stack11/trek/internal/dbm"
+	"github.com/printeers/trek/internal"
+	"github.com/printeers/trek/internal/dbm"
 )
 
 func NewCheckCommand() *cobra.Command {

@@ -30,7 +30,7 @@ jobs:
         id: trek_meta
         uses: docker/metadata-action@v3
         with:
-          images: ghcr.io/stack11/trek
+          images: ghcr.io/printeers/trek
 
       - name: Build and push trek Docker image
         uses: docker/build-push-action@v2
