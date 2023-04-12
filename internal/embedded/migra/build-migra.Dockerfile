@@ -1,3 +1,5 @@
+# Used with `build-migra.sh` to build a static migra binary.
+
 FROM python:3.10-alpine
 
 RUN apk add git build-base libffi-dev scons patchelf

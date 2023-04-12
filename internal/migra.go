@@ -1,26 +1,20 @@
 package internal
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 
-	"github.com/printeers/trek/internal/embed"
+	"github.com/printeers/trek/internal/embedded/migra"
 )
 
 func Migra(from, to string) (string, error) {
-	outBinary := "/tmp/migra"
-	if _, err := os.Stat(outBinary); errors.Is(err, os.ErrNotExist) {
-		//nolint:gosec
-		err = os.WriteFile(outBinary, embed.MigraBinary, 0o700)
-		if err != nil {
-			return "", fmt.Errorf("failed to extract migra binary: %w", err)
-		}
+	migraPath, err := migra.Path()
+	if err != nil {
+		return "", fmt.Errorf("failed to get migra path: %w", err)
 	}
-
-	cmdMigra := exec.Command(outBinary, "--unsafe", "--with-privileges", from, to)
+	cmdMigra := exec.Command(migraPath, "--unsafe", "--with-privileges", from, to)
 	cmdMigra.Stderr = os.Stderr
 	output, err := cmdMigra.Output()
 	if err != nil && cmdMigra.ProcessState.ExitCode() != 2 {

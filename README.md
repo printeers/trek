@@ -4,10 +4,27 @@
 At least version 13 of postgres is needed.
 
 ## Installation
-`go install .`
+
+```bash
+go install .
+```
+
+## Dependencies
+
+Trek depends on `migra` and `pgmodeler-cli`. Trek will try to locate these in the `$PATH` of the user.
+
+If `migra` cannot be found, trek will try use versions of this binary that is embedded into the trek build. The user can skip searching for `migra` in the path by setting `TREK_FORCE_EMBEDDED_MIGRA`. For example:
+
+```bash
+trek --force-embedded-migra=true generate --stdout
+```
+
+_Note that the embedded migra is [built using a patched schemainspect library](internal/embedded/migra/build-migra.Dockerfile), which is [awaiting upstream merge](https://github.com/djrobstep/schemainspect/pull/67)._
 
 ## Setup
+
 Create `trek.yaml`:
+
 ```yaml
 model_name: <model_name>
 db_name: <db_name>
