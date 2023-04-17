@@ -52,7 +52,7 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           context: .
-          dockerfile: Dockerfile.pgmodeler
+          file: Dockerfile.pgmodeler
           pull: true
           push: true
           tags: ${{ steps.trek_meta_suffixed.outputs.tags }}
