@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/printeers/trek/internal"
-	"github.com/printeers/trek/internal/embed"
+	"github.com/printeers/trek/internal/embedded/templates"
 )
 
 var errInvalidModelName = errors.New("invalid model name")
@@ -111,10 +111,10 @@ func NewInitCommand() *cobra.Command {
 			}
 
 			for file, tmpl := range map[string]string{
-				fmt.Sprintf("%s.dbm", modelName): embed.DbmTmpl,
-				"docker-compose.yaml":            embed.DockerComposeYamlTmpl,
-				"Dockerfile":                     embed.DockerfileTmpl,
-				"trek.yaml":                      embed.TrekYamlTmpl,
+				fmt.Sprintf("%s.dbm", modelName): templates.DbmTmpl,
+				"docker-compose.yaml":            templates.DockerComposeYamlTmpl,
+				"Dockerfile":                     templates.DockerfileTmpl,
+				"trek.yaml":                      templates.TrekYamlTmpl,
 			} {
 				err = writeTemplateFile(tmpl, file, templateData)
 				if err != nil {

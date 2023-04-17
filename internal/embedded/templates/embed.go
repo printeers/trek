@@ -1,4 +1,4 @@
-package embed
+package templates
 
 import _ "embed"
 
@@ -13,6 +13,3 @@ var DockerfileTmpl string
 
 //go:embed trek.yaml.tmpl
 var TrekYamlTmpl string
-
-//go:embed bin/migra
-var MigraBinary []byte
