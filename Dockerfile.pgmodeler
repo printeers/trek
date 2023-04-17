@@ -13,7 +13,7 @@ COPY ./main.go /trek
 RUN go build -o dist/bin/trek .
 
 
-FROM ghcr.io/printeers/docker-pgmodeler:latest
+FROM ghcr.io/printeers/pgmodeler:latest
 COPY --from=build /trek/dist/bin/trek /usr/local/bin/trek
 
 WORKDIR /data

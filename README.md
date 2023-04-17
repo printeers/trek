@@ -21,6 +21,20 @@ trek --force-embedded-migra=true generate --stdout
 
 _Note that the embedded migra is [built using a patched schemainspect library](internal/embedded/migra/build-migra.Dockerfile), which is [awaiting upstream merge](https://github.com/djrobstep/schemainspect/pull/67)._
 
+If you have trouble setting up pgmodeler-cli
+
+## MacOS
+
+If you're running on a mac (for which the embedded `migra` doesn't work), you may want to consider using `docker` to run trek under `linux/amd64` (Rosetta emulation).
+
+## Docker
+
+To run `trek` in docker:
+
+```bash
+docker run -v ./:/data ghcr.io/printeers/trek:latest-pgmodeler trek ...
+```
+
 ## Setup
 
 Create `trek.yaml`:
