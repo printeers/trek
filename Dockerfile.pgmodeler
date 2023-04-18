@@ -13,7 +13,18 @@ COPY ./main.go /trek
 RUN go build -o dist/bin/trek .
 
 
-FROM ghcr.io/printeers/pgmodeler:latest
+FROM ghcr.io/printeers/pgmodeler:latest AS release
 COPY --from=build /trek/dist/bin/trek /usr/local/bin/trek
+
+RUN apt update && \
+    apt upgrade -y && \
+    apt install -y \
+		bash \
+        postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 1000 nonroot && \
+    useradd --create-home --shell /bin/bash --uid 1000 --gid 1000 nonroot
+USER nonroot
 
 WORKDIR /data
