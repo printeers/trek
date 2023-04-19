@@ -46,7 +46,7 @@ func installAndGetPath() (string, error) {
 	trekCachePath := filepath.Join(cachePath, "trek")
 	_, err = os.Stat(trekCachePath)
 	if errors.Is(err, os.ErrNotExist) {
-		err = os.Mkdir(trekCachePath, 0o775)
+		err = os.MkdirAll(trekCachePath, 0o700)
 		if err != nil {
 			return "", fmt.Errorf("failed to create trek cache dir: %w", err)
 		}
