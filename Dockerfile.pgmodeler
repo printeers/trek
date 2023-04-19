@@ -27,4 +27,6 @@ RUN groupadd --gid 1000 nonroot && \
     useradd --create-home --shell /bin/bash --uid 1000 --gid 1000 nonroot
 USER nonroot
 
+RUN mkdir /home/nonroot/.cache
+
 WORKDIR /data
