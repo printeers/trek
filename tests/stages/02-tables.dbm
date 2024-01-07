@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+CAUTION: Do not modify this file unless you know what you are doing.
+ Unexpected results may occur if the code is changed deliberately.
+-->
+<dbmodel pgmodeler-ver="1.0.6" use-changelog="false" last-position="0,0" last-zoom="1" max-obj-count="4"
+	 default-owner="postgres"
+	 layers="Default layer"
+	 active-layers="0"
+	 layer-name-colors="#000000"
+	 layer-rect-colors="#893ae4"
+	 show-layer-names="false" show-layer-rects="false">
+<role name="santa"
+ sql-disabled="true">
+</role>
+
+<role name="worker"
+ sql-disabled="true">
+</role>
+
+<database name="north_pole" is-template="false" allow-conns="true" sql-disabled="true">
+</database>
+
+<schema name="public" layers="0" rect-visible="true" fill-color="#e1e1e1" sql-disabled="true">
+	<role name="postgres"/>
+</schema>
+
+<schema name="warehouse" layers="0" rect-visible="true" fill-color="#e1e1e1">
+	<role name="postgres"/>
+</schema>
+
+<schema name="factory" layers="0" rect-visible="true" fill-color="#e1e1e1">
+	<role name="postgres"/>
+</schema>
+
+<table name="storage_locations" layers="0" collapse-mode="2" max-obj-count="4" z-value="0">
+	<schema name="warehouse"/>
+	<role name="postgres"/>
+	<position x="1120" y="520"/>
+	<column name="shelf" not-null="true">
+		<type name="bigint" length="0"/>
+	</column>
+	<column name="total_capacity" not-null="true">
+		<type name="bigint" length="0"/>
+	</column>
+	<column name="used_capacity" not-null="true">
+		<type name="bigint" length="0"/>
+	</column>
+	<column name="current_toy_type" not-null="true">
+		<type name="text" length="0"/>
+	</column>
+</table>
+
+<table name="machines" layers="0" collapse-mode="2" max-obj-count="2" z-value="0">
+	<schema name="factory"/>
+	<role name="postgres"/>
+	<position x="858" y="519"/>
+	<column name="name" not-null="true">
+		<type name="text" length="0"/>
+	</column>
+	<column name="toys_produced" not-null="true">
+		<type name="bigint" length="0"/>
+	</column>
+</table>
+
+</dbmodel>
