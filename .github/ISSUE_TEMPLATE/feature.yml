@@ -3,6 +3,10 @@ description: Form to request a feature
 labels: ["enhancement"]
 projects: []
 body:
+  - type: markdown
+    attributes:
+      value: |
+        This form is for requesting any functional change of the software. Features can sometimes be for the developers only, such as adding tests or renaming things. In that case, start with 'as a developer, I want ..'.
   - type: textarea
     id: story
     attributes:

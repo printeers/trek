@@ -3,6 +3,10 @@ description: Form to report a bug
 labels: ["bug"]
 projects: []
 body:
+  - type: markdown
+    attributes:
+      value: |
+        This form is for reporting any situation where a feature is not working as expected.
   - type: textarea
     id: info
     attributes:
