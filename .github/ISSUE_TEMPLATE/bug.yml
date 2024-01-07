@@ -1,0 +1,29 @@
+name: Bug report
+description: Form to report a bug
+labels: ["bug"]
+projects: []
+body:
+  - type: textarea
+    id: info
+    attributes:
+      label: Description
+      description: General description
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: Steps To Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. In this environment...
+        1. With this config...
+        1. Run '...'
+        1. See error...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks.
+      render: shell
