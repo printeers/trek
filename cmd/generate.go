@@ -526,30 +526,15 @@ func generateMigrationStatements(
 	}
 
 	// Filter stuff from go-migrate that doesn't exist in the target db, and we don't have and need anyway
-	statements = strings.ReplaceAll(
-		statements,
-		"alter table \"public\".\"schema_migrations\" drop constraint \"schema_migrations_pkey\";",
-		"",
-	)
-	statements = strings.ReplaceAll(
-		statements,
-		"drop index if exists \"public\".\"schema_migrations_pkey\";",
-		"",
-	)
-	statements = strings.ReplaceAll(
-		statements,
-		"drop table \"public\".\"schema_migrations\";",
-		"",
-	)
-	statements = strings.Trim(statements, "\n")
-
-	var lines []string
-	for _, line := range strings.Split(statements, "\n") {
-		if line != "" {
-			lines = append(lines, line)
-		}
+	filter := []string{
+		"alter table \"public\".\"schema_migrations\" drop constraint \"schema_migrations_pkey\";\n\n",
+		"drop index if exists \"public\".\"schema_migrations_pkey\";\n\n",
+		"drop table \"public\".\"schema_migrations\";\n\n",
 	}
-	statements = strings.Join(lines, "\n")
+	for _, f := range filter {
+		statements = strings.ReplaceAll(statements, f, "")
+	}
+	statements = strings.Trim(statements, "\n")
 
 	extraStatements, err := generateMissingPermissionStatements(ctx, tmpDir, statements, targetConn, migrateConn)
 	if err != nil {
