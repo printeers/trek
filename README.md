@@ -1,13 +1,16 @@
 # trek
 
-## Requirements
-At least version 13 of postgres is needed.
+## Compatibility
+
+Trek works with PostgreSQL version 13 or newer. We build trek with the latest stable version of pgModeler.
 
 ## Installation
 
 ```bash
-go install .
+go install github.com/printeers/trek@latest
 ```
+
+Or use a [released docker image](https://github.com/printeers/trek/pkgs/container/trek).
 
 ## Dependencies
 
