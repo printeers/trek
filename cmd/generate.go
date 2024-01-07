@@ -543,14 +543,6 @@ func generateMigrationStatements(
 	)
 	statements = strings.Trim(statements, "\n")
 
-	var lines []string
-	for _, line := range strings.Split(statements, "\n") {
-		if line != "" {
-			lines = append(lines, line)
-		}
-	}
-	statements = strings.Join(lines, "\n")
-
 	extraStatements, err := generateMissingPermissionStatements(ctx, tmpDir, statements, targetConn, migrateConn)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate missing permission statements: %w", err)
