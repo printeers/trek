@@ -1,4 +1,5 @@
 set check_function_bodies = off;
+
 CREATE OR REPLACE FUNCTION factory.tr_machines_toys_produced_increase()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -11,4 +12,5 @@ BEGIN
 END;
 $function$
 ;
+
 CREATE TRIGGER toys_produced_increase BEFORE UPDATE OF toys_produced ON factory.machines FOR EACH ROW EXECUTE FUNCTION factory.tr_machines_toys_produced_increase();
