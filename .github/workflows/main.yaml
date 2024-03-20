@@ -21,6 +21,7 @@ jobs:
         uses: golangci/golangci-lint-action@v4
         with:
           version: v1.57.0
+          only-new-issues: true
   build-and-push-images:
     needs: golangci
     runs-on: ubuntu-latest
