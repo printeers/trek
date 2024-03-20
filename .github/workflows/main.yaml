@@ -18,9 +18,9 @@ jobs:
       - uses: actions/checkout@v2
       - run: touch internal/embedded/migra/migra
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v4
         with:
-          version: v1.51.1
+          version: v1.57.0
   build-and-push-images:
     needs: golangci
     runs-on: ubuntu-latest
