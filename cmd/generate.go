@@ -177,7 +177,7 @@ func NewGenerateCommand() *cobra.Command {
 
 			err = initialFunc()
 			if err != nil {
-				log.Printf("Failed to run: %v\n", err)
+				return err
 			}
 
 			if dev {
