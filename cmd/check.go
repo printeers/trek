@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
+	"github.com/jackc/pgx/v5"
 	internalpostgres "github.com/printeers/trek/internal/postgres"
 
 	// needed driver.
@@ -64,18 +65,19 @@ func checkAll(
 	wd,
 	migrationsDir string,
 ) error {
-	postgres, conn, err := setupDatabase(ctx, "check", 5434)
-	defer func() {
-		if conn != nil {
-			_ = conn.Close(ctx)
-		}
-		if postgres != nil {
-			_ = postgres.Stop()
-		}
-	}()
+	postgres, err := setupDatabase(5434)
 	if err != nil {
 		return fmt.Errorf("failed to setup database: %w", err)
 	}
+	defer postgres.Stop() //nolint:errcheck
+
+	dsn := postgres.DSN("postgres")
+
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer conn.Close(ctx)
 
 	for _, u := range config.DatabaseUsers {
 		var userExists bool
@@ -135,7 +137,7 @@ func checkAll(
 
 	log.Println("Checking migrations and testdata")
 
-	err = checkMigrationsAndTestdata(ctx, wd, migrationsDir, postgres.DSN(), migrationFiles)
+	err = checkMigrationsAndTestdata(ctx, wd, migrationsDir, dsn, migrationFiles)
 	if err != nil {
 		return fmt.Errorf("failed to check migrations and testdata: %w", err)
 	}

@@ -68,6 +68,6 @@ func (p *postgresDatabaseEmbedded) Stop() error {
 	return nil
 }
 
-func (p *postgresDatabaseEmbedded) DSN() string {
-	return fmt.Sprintf("postgres://postgres:postgres@127.0.0.1:%d/postgres?sslmode=disable", p.port)
+func (p *postgresDatabaseEmbedded) DSN(database string) string {
+	return fmt.Sprintf("postgres://postgres:postgres@127.0.0.1:%d/%s?sslmode=disable", p.port, database)
 }

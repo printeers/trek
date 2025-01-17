@@ -12,7 +12,7 @@ import (
 type Database interface {
 	Start(port uint32) error
 	Stop() error
-	DSN() string
+	DSN(database string) string
 }
 
 func NewPostgresDatabase() Database {
