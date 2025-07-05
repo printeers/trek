@@ -20,6 +20,8 @@ func PgModelerExportToFile(input, output string) error {
 		"--export-to-file",
 		"--output",
 		output,
+		"--pgsql-ver",
+		pgversionPgmodeler,
 	)
 	cmdPgModeler.Stderr = os.Stderr
 

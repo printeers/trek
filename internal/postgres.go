@@ -18,7 +18,7 @@ func NewPostgresDatabase(runtimePath string, port uint32) (postgres *embeddedpos
 		embeddedpostgres.
 			DefaultConfig().
 			Logger(&buf).
-			Version(embeddedpostgres.V15).
+			Version(pgversionEmbeddedpostgres). // keep in sync with pgmodeler.go
 			RuntimePath(runtimePath).
 			Username("postgres").
 			Password("postgres").
