@@ -13,7 +13,7 @@ import (
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/golang-migrate/migrate/v4"
-	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v5"
 	"github.com/spf13/cobra"
 
 	"github.com/printeers/trek/internal"
@@ -527,9 +527,11 @@ func generateMigrationStatements(
 
 	// Filter stuff from go-migrate that doesn't exist in the target db, and we don't have and need anyway
 	filter := []string{
-		"alter table \"public\".\"schema_migrations\" drop constraint \"schema_migrations_pkey\";\n\n",
-		"drop index if exists \"public\".\"schema_migrations_pkey\";\n\n",
-		"drop table \"public\".\"schema_migrations\";\n\n",
+		`alter table "public"."schema_migrations" drop constraint "schema_migrations_dirty_not_null";` + "\n\n",
+		`alter table "public"."schema_migrations" drop constraint "schema_migrations_version_not_null";` + "\n\n",
+		`alter table "public"."schema_migrations" drop constraint "schema_migrations_pkey";` + "\n\n",
+		`drop index if exists "public"."schema_migrations_pkey";` + "\n\n",
+		`drop table "public"."schema_migrations";` + "\n\n",
 	}
 	for _, f := range filter {
 		statements = strings.ReplaceAll(statements, f, "")

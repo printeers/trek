@@ -8,7 +8,7 @@ import (
 	"os/exec"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
-	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v5"
 )
 
 func NewPostgresDatabase(runtimePath string, port uint32) (postgres *embeddedpostgres.EmbeddedPostgres, dsn string) {

@@ -15,7 +15,7 @@ Trek is an opinionated tool. We built it to do one thing and do it well: convert
 
 ## Compatibility
 
-Trek works with PostgreSQL version 13 or newer. We build trek with the latest stable version of pgModeler.
+Trek tries to stay up-to-date with the latest stable version of PostgreSQL. We build trek with the latest stable version of pgModeler.
 
 We develop and test Trek on Linux. Trek may work on other platforms via Docker.
 
@@ -38,6 +38,8 @@ trek --force-embedded-migra=true generate --stdout
 ```
 
 _Note that the embedded migra is [built using a patched schemainspect library](internal/embedded/migra/build-migra.Dockerfile), which is [awaiting upstream merge](https://github.com/djrobstep/schemainspect/pull/67)._
+
+_Note also that we should probably migrate from migra to [results](https://github.com/djrobstep/results)._
 
 ## MacOS / Windows
 
