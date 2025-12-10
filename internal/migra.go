@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,12 +10,12 @@ import (
 	"github.com/printeers/trek/internal/embedded/migra"
 )
 
-func Migra(from, to string) (string, error) {
+func Migra(ctx context.Context, from, to string) (string, error) {
 	migraPath, err := migra.Path()
 	if err != nil {
 		return "", fmt.Errorf("failed to get migra path: %w", err)
 	}
-	cmdMigra := exec.Command(migraPath, "--unsafe", "--with-privileges", from, to)
+	cmdMigra := exec.CommandContext(ctx, migraPath, "--unsafe", "--with-privileges", from, to)
 	cmdMigra.Stderr = os.Stderr
 	output, err := cmdMigra.Output()
 	if err != nil && cmdMigra.ProcessState.ExitCode() != 2 {

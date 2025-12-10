@@ -27,7 +27,7 @@ func NewPostgresDatabase(runtimePath string, port uint32) (postgres *embeddedpos
 	), fmt.Sprintf("postgres://postgres:postgres@127.0.0.1:%d/postgres", port)
 }
 
-func PgDump(dsn string, args []string) (string, error) {
+func PgDump(ctx context.Context, dsn string, args []string) (string, error) {
 	cmd := []string{
 		"pg_dump",
 		"--dbname",
@@ -36,7 +36,7 @@ func PgDump(dsn string, args []string) (string, error) {
 	cmd = append(cmd, args...)
 
 	//nolint:gosec
-	cmdPgDump := exec.Command(cmd[0], cmd[1:]...)
+	cmdPgDump := exec.CommandContext(ctx, cmd[0], cmd[1:]...)
 	cmdPgDump.Stderr = os.Stderr
 
 	stdout, err := cmdPgDump.Output()
@@ -47,8 +47,9 @@ func PgDump(dsn string, args []string) (string, error) {
 	return string(stdout), nil
 }
 
-func PsqlFile(dsn, file string) error {
-	cmdPsql := exec.Command(
+func PsqlFile(ctx context.Context, dsn, file string) error {
+	cmdPsql := exec.CommandContext(
+		ctx,
 		"psql",
 		"--echo-errors",
 		"--variable",

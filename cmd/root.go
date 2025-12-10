@@ -11,7 +11,7 @@ func NewRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "trek",
 		Short: "A tool to create, organize and run database migrations.",
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 			internal.InitializeFlags(cmd)
 		},
 	}

@@ -32,33 +32,33 @@ func NewGenerateCommand() *cobra.Command {
 	generateCmd := &cobra.Command{
 		Use:   "generate [migration-name]",
 		Short: "Generate the migrations for a pgModeler file",
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 			internal.InitializeFlags(cmd)
 		},
-		Args: func(cmd *cobra.Command, args []string) error {
+		Args: func(_ *cobra.Command, args []string) error {
 			if stdout {
 				if len(args) != 0 {
-					//nolint:goerr113
+					//nolint:err113
 					return errors.New("pass no name for stdout generation")
 				}
 			} else {
 				if len(args) == 0 {
-					//nolint:goerr113
+					//nolint:err113
 					return errors.New("pass the name of the migration")
 				} else if len(args) > 1 {
-					//nolint:goerr113
+					//nolint:err113
 					return errors.New("expecting one migration name, use lower-kebab-case for the migration name")
 				}
 
 				if !internal.RegexpMigrationName.MatchString(args[0]) {
-					//nolint:goerr113
+					//nolint:err113
 					return errors.New("migration name must be lower-kebab-case and must not start or end with a number or dash")
 				}
 			}
 
 			return nil
 		},
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			ctx := context.Background()
 
 			wd, err := os.Getwd()
@@ -296,7 +296,7 @@ func runWithStdout(
 			return fmt.Errorf("failed to write temporary migration file: %w", err)
 		}
 
-		err = internal.RunHook(wd, "generate-migration-post", &internal.HookOptions{
+		err = internal.RunHook(ctx, wd, "generate-migration-post", &internal.HookOptions{
 			Args: []string{file.Name()},
 		})
 		if err != nil {
@@ -396,7 +396,7 @@ func runWithFile(
 		}
 		log.Println("Wrote migration file")
 
-		err = internal.RunHook(wd, "generate-migration-post", &internal.HookOptions{
+		err = internal.RunHook(ctx, wd, "generate-migration-post", &internal.HookOptions{
 			Args: []string{newMigrationFilePath},
 		})
 		if err != nil {
@@ -471,6 +471,7 @@ func generateMigrationStatements(
 	log.Println("Generating migration statements")
 
 	err := internal.PgModelerExportToFile(
+		ctx,
 		filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName)),
 		filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)),
 	)
@@ -480,6 +481,7 @@ func generateMigrationStatements(
 
 	go func() {
 		err = internal.PgModelerExportToPng(
+			ctx,
 			filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName)),
 			filepath.Join(wd, fmt.Sprintf("%s.png", config.ModelName)),
 		)
@@ -520,7 +522,7 @@ func generateMigrationStatements(
 		return "", fmt.Errorf("failed to execute migrate sql: %w", err)
 	}
 
-	statements, err := internal.Migra(internal.DSN(migrateConn, "disable"), internal.DSN(targetConn, "disable"))
+	statements, err := internal.Migra(ctx, internal.DSN(migrateConn, "disable"), internal.DSN(targetConn, "disable"))
 	if err != nil {
 		return "", fmt.Errorf("failed to run migra: %w", err)
 	}
@@ -604,13 +606,13 @@ func generateMissingPermissionStatements(
 		"--exclude-table=public.schema_migrations",
 	}
 
-	targetDump, err := internal.PgDump(internal.DSN(targetConn, "disable"), pgDumpOptions)
+	targetDump, err := internal.PgDump(ctx, internal.DSN(targetConn, "disable"), pgDumpOptions)
 	if err != nil {
 		//nolint:wrapcheck
 		return "", err
 	}
 
-	migrateDump, err := internal.PgDump(internal.DSN(migrateConn, "disable"), pgDumpOptions)
+	migrateDump, err := internal.PgDump(ctx, internal.DSN(migrateConn, "disable"), pgDumpOptions)
 	if err != nil {
 		//nolint:wrapcheck
 		return "", err
@@ -628,7 +630,8 @@ func generateMissingPermissionStatements(
 		return "", fmt.Errorf("failed to write migrate.sql file: %w", err)
 	}
 
-	diffCmd := exec.Command(
+	diffCmd := exec.CommandContext(
+		ctx,
 		"diff",
 		"--minimal",
 		"--unchanged-line-format=",
@@ -642,7 +645,7 @@ func generateMissingPermissionStatements(
 	output, err := diffCmd.Output()
 	if err != nil {
 		var ee *exec.ExitError
-		if !(errors.As(err, &ee) && ee.ExitCode() != 0) {
+		if !errors.As(err, &ee) || ee.ExitCode() == 0 {
 			return "", fmt.Errorf("failed to run diff: %w %s", err, string(output))
 		}
 	}

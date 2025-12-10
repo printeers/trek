@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -9,7 +10,7 @@ import (
 	"path/filepath"
 )
 
-func RunHook(wd, hookName string, options *HookOptions) error {
+func RunHook(ctx context.Context, wd, hookName string, options *HookOptions) error {
 	hooksDir := filepath.Join(wd, "hooks")
 	filePath := filepath.Join(hooksDir, hookName)
 	if _, err := os.Stat(filePath); errors.Is(err, os.ErrNotExist) {
@@ -32,7 +33,7 @@ func RunHook(wd, hookName string, options *HookOptions) error {
 		env = append(env, envValues...)
 	}
 
-	cmd := exec.Command(filePath, args...)
+	cmd := exec.CommandContext(ctx, filePath, args...)
 	cmd.Env = env
 	cmd.Dir = hooksDir
 	cmd.Stdout = os.Stdout

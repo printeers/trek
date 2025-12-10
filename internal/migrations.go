@@ -73,6 +73,10 @@ func FindMigrations(migrationsDir string, strict bool) ([]string, error) {
 	var files []string
 
 	err := filepath.WalkDir(migrationsDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
 		if path == migrationsDir {
 			return nil
 		}
@@ -82,7 +86,7 @@ func FindMigrations(migrationsDir string, strict bool) ([]string, error) {
 
 		if strict {
 			if !RegexpMigrationFileName.MatchString(d.Name()) {
-				//nolint:goerr113
+				//nolint:err113
 				return fmt.Errorf("invalid migration file name %q", d.Name())
 			}
 		}

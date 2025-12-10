@@ -1,19 +1,21 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 )
 
-func PgModelerExportToFile(input, output string) error {
+func PgModelerExportToFile(ctx context.Context, input, output string) error {
 	//nolint:gosec
 	err := os.WriteFile(output, []byte{}, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)
 	}
 	//nolint:gosec
-	cmdPgModeler := exec.Command(
+	cmdPgModeler := exec.CommandContext(
+		ctx,
 		"pgmodeler-cli",
 		"--input",
 		input,
@@ -33,14 +35,15 @@ func PgModelerExportToFile(input, output string) error {
 	return nil
 }
 
-func PgModelerExportToPng(input, output string) error {
+func PgModelerExportToPng(ctx context.Context, input, output string) error {
 	//nolint:gosec
 	err := os.WriteFile(output, []byte{}, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to create output png: %w", err)
 	}
 	//nolint:gosec
-	cmdPgModeler := exec.Command(
+	cmdPgModeler := exec.CommandContext(
+		ctx,
 		"pgmodeler-cli",
 		"--input",
 		input,

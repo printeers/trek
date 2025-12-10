@@ -36,10 +36,10 @@ func NewApplyCommand() *cobra.Command {
 	applyCmd := &cobra.Command{
 		Use:   "apply",
 		Short: "Apply the migrations to a running database",
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 			internal.InitializeFlags(cmd)
 		},
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			ctx := context.Background()
 
 			wd, err := os.Getwd()
@@ -68,7 +68,7 @@ func NewApplyCommand() *cobra.Command {
 			if resetDatabase {
 				log.Println("Resetting database")
 
-				err = internal.RunHook(wd, "apply-reset-pre", nil)
+				err = internal.RunHook(ctx, wd, "apply-reset-pre", nil)
 				if err != nil {
 					return fmt.Errorf("failed to run hook: %w", err)
 				}
@@ -148,13 +148,17 @@ func NewApplyCommand() *cobra.Command {
 						return fmt.Errorf("failed to apply migration %q: %w", file, err)
 					}
 					if insertTestData {
-						err = filepath.Walk(filepath.Join(wd, "testdata"), func(p string, info fs.FileInfo, err error) error {
+						err = filepath.Walk(filepath.Join(wd, "testdata"), func(p string, _ fs.FileInfo, err error) error {
+							if err != nil {
+								return err
+							}
+
 							if strings.HasPrefix(path.Base(p), fmt.Sprintf("%03d", index+1)) {
 								log.Printf("Inserting testdata %q\n", path.Base(p))
 
 								// We have to use psql, because users might use commands like "\copy"
 								// which don't work by directly connecting to the database
-								err := internal.PsqlFile(dsn, p)
+								err := internal.PsqlFile(ctx, dsn, p)
 								if err != nil {
 									return fmt.Errorf("failed to insert testdata: %w", err)
 								}
@@ -170,7 +174,7 @@ func NewApplyCommand() *cobra.Command {
 					}
 				}
 
-				err = internal.RunHook(wd, "apply-reset-post", nil)
+				err = internal.RunHook(ctx, wd, "apply-reset-post", nil)
 				if err != nil {
 					return fmt.Errorf("failed to run hook: %w", err)
 				}
