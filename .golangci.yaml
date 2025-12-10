@@ -1,34 +1,13 @@
-output:
-  sort-results: true
-linters-settings:
-  cyclop:
-    max-complexity: 15
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-    disabled-checks:
-      - whyNoLint
-  govet:
-    check-shadowing: true
-  lll:
-    line-length: 120
-  misspell:
-    locale: US
-
+version: "2"
 linters:
-  disable-all: true
+  default: none
   enable:
     - bodyclose
     - cyclop
-    - deadcode
     - dogsled
+    - err113
     - errcheck
     - errorlint
-    - exportloopref
     - gochecknoglobals
     - gochecknoinits
     - gocognit
@@ -36,12 +15,8 @@ linters:
     - gocritic
     - godot
     - godox
-    - goerr113
-    - gofmt
-    - goimports
     - goprintffuncname
     - gosec
-    - gosimple
     - govet
     - ineffassign
     - lll
@@ -54,15 +29,51 @@ linters:
     - revive
     - rowserrcheck
     - staticcheck
-    - structcheck
-    - stylecheck
     - tagliatelle
     - testpackage
     - thelper
-    - typecheck
     - unconvert
     - unparam
     - unused
-    - varcheck
     - whitespace
     - wrapcheck
+  settings:
+    cyclop:
+      max-complexity: 15
+    gocritic:
+      disabled-checks:
+        - whyNoLint
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+    govet:
+      enable:
+        - shadow
+    lll:
+      line-length: 120
+    misspell:
+      locale: US
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

@@ -32,10 +32,10 @@ func NewInitCommand() *cobra.Command {
 	initCmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create a new trek project",
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 			internal.InitializeFlags(cmd)
 		},
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			ctx := context.Background()
 
 			wd, err := os.Getwd()
