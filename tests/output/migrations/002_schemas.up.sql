@@ -1,3 +1,13 @@
-create schema if not exists "factory";
+/*
+Statement 0
+*/
+SET SESSION statement_timeout = 3000;
+SET SESSION lock_timeout = 3000;
+CREATE SCHEMA "factory";
 
-create schema if not exists "warehouse";
+/*
+Statement 1
+*/
+SET SESSION statement_timeout = 3000;
+SET SESSION lock_timeout = 3000;
+CREATE SCHEMA "warehouse";

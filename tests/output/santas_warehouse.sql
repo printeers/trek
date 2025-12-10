@@ -1,27 +1,8 @@
--- Database generated with pgModeler (PostgreSQL Database Modeler).
--- pgModeler version: 1.0.6
--- PostgreSQL version: 16.0
--- Project Site: pgmodeler.io
--- Model Author: ---
--- -- object: santa | type: ROLE --
--- -- DROP ROLE IF EXISTS santa;
--- CREATE ROLE santa WITH ;
--- -- ddl-end --
--- 
--- -- object: worker | type: ROLE --
--- -- DROP ROLE IF EXISTS worker;
--- CREATE ROLE worker WITH ;
--- -- ddl-end --
--- 
-
--- Database creation must be performed outside a multi lined SQL file. 
--- These commands were put in this file only as a convenience.
--- 
--- -- object: north_pole | type: DATABASE --
--- -- DROP DATABASE IF EXISTS north_pole;
--- CREATE DATABASE north_pole;
--- -- ddl-end --
--- 
+-- ** Database generated with pgModeler (PostgreSQL Database Modeler).
+-- ** pgModeler version: 1.2.2
+-- ** PostgreSQL version: 18.0
+-- ** Project Site: pgmodeler.io
+-- ** Model Author: ---
 
 SET check_function_bodies = false;
 -- ddl-end --
@@ -102,7 +83,7 @@ ALTER TABLE warehouse.storage_locations OWNER TO postgres;
 
 -- object: factory.tr_machines_toys_produced_increase | type: FUNCTION --
 -- DROP FUNCTION IF EXISTS factory.tr_machines_toys_produced_increase() CASCADE;
-CREATE FUNCTION factory.tr_machines_toys_produced_increase ()
+CREATE OR REPLACE FUNCTION factory.tr_machines_toys_produced_increase ()
 	RETURNS trigger
 	LANGUAGE plpgsql
 	VOLATILE 
@@ -110,20 +91,21 @@ CREATE FUNCTION factory.tr_machines_toys_produced_increase ()
 	SECURITY INVOKER
 	PARALLEL UNSAFE
 	COST 1
-	AS $$
+	AS 
+$function$
 BEGIN
 	IF NEW.toys_produced < OLD.toys_produced THEN
 		RAISE EXCEPTION 'Toys produced count can not be lowered';
 	END IF;
 END;
-$$;
+$function$;
 -- ddl-end --
 ALTER FUNCTION factory.tr_machines_toys_produced_increase() OWNER TO postgres;
 -- ddl-end --
 
 -- object: toys_produced_increase | type: TRIGGER --
 -- DROP TRIGGER IF EXISTS toys_produced_increase ON factory.machines CASCADE;
-CREATE TRIGGER toys_produced_increase
+CREATE OR REPLACE TRIGGER toys_produced_increase
 	BEFORE UPDATE OF toys_produced
 	ON factory.machines
 	FOR EACH ROW

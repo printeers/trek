@@ -16,9 +16,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
-      - name: Build migra
-        run: ./internal/embedded/migra/build-migra.sh
-
       - name: Log in to the Container registry
         uses: docker/login-action@v1
         with:

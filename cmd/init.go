@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/printeers/trek/internal"
-	"github.com/printeers/trek/internal/embedded/templates"
+	"github.com/printeers/trek/internal/templates"
 )
 
 var errInvalidModelName = errors.New("invalid model name")
