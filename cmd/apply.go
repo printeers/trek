@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
+	internalpostgres "github.com/printeers/trek/internal/postgres"
+
 	// needed driver.
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -82,7 +84,7 @@ func NewApplyCommand() *cobra.Command {
 				}
 			}
 
-			databaseExists, err := internal.CheckDatabaseExists(ctx, conn, config.DatabaseName)
+			databaseExists, err := internalpostgres.CheckDatabaseExists(ctx, conn, config.DatabaseName)
 			if err != nil {
 				return fmt.Errorf("failed to check if database exists: %w", err)
 			}
@@ -95,7 +97,7 @@ func NewApplyCommand() *cobra.Command {
 
 			for _, u := range config.DatabaseUsers {
 				var userExists bool
-				userExists, err = internal.CheckUserExists(ctx, conn, u)
+				userExists, err = internalpostgres.CheckUserExists(ctx, conn, u)
 				if err != nil {
 					return fmt.Errorf("failed to check if user exists: %w", err)
 				}
@@ -158,7 +160,7 @@ func NewApplyCommand() *cobra.Command {
 
 								// We have to use psql, because users might use commands like "\copy"
 								// which don't work by directly connecting to the database
-								err := internal.PsqlFile(ctx, dsn, p)
+								err := internalpostgres.PsqlFile(ctx, dsn, p)
 								if err != nil {
 									return fmt.Errorf("failed to insert testdata: %w", err)
 								}

@@ -14,6 +14,9 @@ import (
 	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
+	"github.com/jackc/pgx/v5"
+	internalpostgres "github.com/printeers/trek/internal/postgres"
+
 	// needed driver.
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -48,18 +51,7 @@ func NewCheckCommand() *cobra.Command {
 				return fmt.Errorf("failed to get migrations directory: %w", err)
 			}
 
-			tmpDir, err := os.MkdirTemp("", "trek-")
-			if err != nil {
-				return fmt.Errorf("failed to create temporary directory: %w", err)
-			}
-
-			err = checkAll(ctx, config, wd, tmpDir, migrationsDir)
-			if err != nil {
-				return err
-			}
-
-			//nolint:wrapcheck
-			return os.RemoveAll(tmpDir)
+			return checkAll(ctx, config, wd, migrationsDir)
 		},
 	}
 
@@ -71,26 +63,25 @@ func checkAll(
 	ctx context.Context,
 	config *internal.Config,
 	wd,
-	tmpDir,
 	migrationsDir string,
 ) error {
-	postgres, conn, dsn, err := setupDatabase(ctx, tmpDir, "check", 5434)
-	defer func() {
-		if conn != nil {
-			_ = conn.Close(ctx)
-		}
-		if postgres != nil {
-			_ = postgres.Stop()
-		}
-	}()
+	postgres, err := setupDatabase(5434)
 	if err != nil {
 		return fmt.Errorf("failed to setup database: %w", err)
 	}
-	dsn = fmt.Sprintf("%s?sslmode=disable", dsn)
+	defer postgres.Stop() //nolint:errcheck
+
+	dsn := postgres.DSN("postgres")
+
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer conn.Close(ctx)
 
 	for _, u := range config.DatabaseUsers {
 		var userExists bool
-		userExists, err = internal.CheckUserExists(ctx, conn, u)
+		userExists, err = internalpostgres.CheckUserExists(ctx, conn, u)
 		if err != nil {
 			return fmt.Errorf("failed to check if user exists: %w", err)
 		}
@@ -306,7 +297,7 @@ func checkMigrationsAndTestdata(ctx context.Context, wd, migrationsDir, dsn stri
 			if strings.HasPrefix(path.Base(p), fmt.Sprintf("%03d", index+1)) {
 				// We have to use psql, because users might use commands like "\copy"
 				// which don't work by directly connecting to the database
-				err := internal.PsqlFile(ctx, dsn, p)
+				err := internalpostgres.PsqlFile(ctx, dsn, p)
 				if err != nil {
 					//nolint:err113
 					return fmt.Errorf("failed to apply testdata: %w", err)

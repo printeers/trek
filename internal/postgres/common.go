@@ -1,30 +1,24 @@
-package internal
+package postgres
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 
-	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/jackc/pgx/v5"
 )
 
-func NewPostgresDatabase(runtimePath string, port uint32) (postgres *embeddedpostgres.EmbeddedPostgres, dsn string) {
-	var buf bytes.Buffer
+type Database interface {
+	Start(port uint32) error
+	Stop() error
+	DSN(database string) string
+}
 
-	return embeddedpostgres.NewDatabase(
-		embeddedpostgres.
-			DefaultConfig().
-			Logger(&buf).
-			Version(pgversionEmbeddedpostgres). // keep in sync with pgmodeler.go
-			RuntimePath(runtimePath).
-			Username("postgres").
-			Password("postgres").
-			Port(port).
-			Database("postgres"),
-	), fmt.Sprintf("postgres://postgres:postgres@127.0.0.1:%d/postgres", port)
+func NewPostgresDatabase() Database {
+	db := &postgresDatabaseEmbedded{}
+
+	return db
 }
 
 func PgDump(ctx context.Context, dsn string, args []string) (string, error) {

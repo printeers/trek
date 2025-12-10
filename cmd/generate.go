@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/jackc/pgx/v5"
 	"github.com/spf13/cobra"
 
 	"github.com/printeers/trek/internal"
+	internalpostgres "github.com/printeers/trek/internal/postgres"
 )
 
 //nolint:gocognit,cyclop
@@ -92,7 +92,7 @@ func NewGenerateCommand() *cobra.Command {
 					}
 
 					if check {
-						err = checkAll(ctx, config, wd, tmpDir, migrationsDir)
+						err = checkAll(ctx, config, wd, migrationsDir)
 						if err != nil {
 							return err
 						}
@@ -161,7 +161,7 @@ func NewGenerateCommand() *cobra.Command {
 					}
 
 					if updated && check {
-						err = checkAll(ctx, config, wd, tmpDir, migrationsDir)
+						err = checkAll(ctx, config, wd, migrationsDir)
 						if err != nil {
 							return err
 						}
@@ -203,29 +203,14 @@ func NewGenerateCommand() *cobra.Command {
 	return generateCmd
 }
 
-func setupDatabase(
-	ctx context.Context,
-	tmpDir,
-	name string,
-	port uint32,
-) (
-	*embeddedpostgres.EmbeddedPostgres,
-	*pgx.Conn,
-	string,
-	error,
-) {
-	postgres, dsn := internal.NewPostgresDatabase(filepath.Join(tmpDir, name), port)
-	err := postgres.Start()
+func setupDatabase(port uint32) (internalpostgres.Database, error) {
+	postgres := internalpostgres.NewPostgresDatabase()
+	err := postgres.Start(port)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("failed to start %q database: %w", name, err)
+		return nil, fmt.Errorf("failed to start database: %w", err)
 	}
 
-	conn, err := pgx.Connect(ctx, dsn)
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("failed to connect to %q database: %w", name, err)
-	}
-
-	return postgres, conn, dsn, nil
+	return postgres, nil
 }
 
 //nolint:gocognit,cyclop
@@ -242,31 +227,39 @@ func runWithStdout(
 		return fmt.Errorf("failed to check if model has been updated: %w", err)
 	}
 	if updated {
-		targetPostgres, targetConn, _, err := setupDatabase(ctx, tmpDir, "target", 5432)
-		defer func() {
-			if targetConn != nil {
-				_ = targetConn.Close(ctx)
-			}
-			if targetPostgres != nil {
-				_ = targetPostgres.Stop()
-			}
-		}()
+		postgres, err := setupDatabase(5432)
 		if err != nil {
-			return fmt.Errorf("failed to setup target database: %w", err)
+			return fmt.Errorf("failed to setup database: %w", err)
+		}
+		defer postgres.Stop() //nolint:errcheck
+
+		postgresConn, err := pgx.Connect(ctx, postgres.DSN("postgres"))
+		if err != nil {
+			return fmt.Errorf("failed to connect to database: %w", err)
+		}
+		defer postgresConn.Close(ctx)
+
+		_, err = postgresConn.Exec(ctx, "CREATE DATABASE target;")
+		if err != nil {
+			return fmt.Errorf("failed to create database: %w", err)
 		}
 
-		migratePostgres, migrateConn, _, err := setupDatabase(ctx, tmpDir, "migrate", 5433)
-		defer func() {
-			if migrateConn != nil {
-				_ = migrateConn.Close(ctx)
-			}
-			if migratePostgres != nil {
-				_ = migratePostgres.Stop()
-			}
-		}()
+		targetConn, err := pgx.Connect(ctx, postgres.DSN("target"))
 		if err != nil {
-			return fmt.Errorf("failed to setup migrate database: %w", err)
+			return fmt.Errorf("failed to connect to database: %w", err)
 		}
+		defer targetConn.Close(ctx)
+
+		_, err = postgresConn.Exec(ctx, "CREATE DATABASE migrate;")
+		if err != nil {
+			return fmt.Errorf("failed to create database: %w", err)
+		}
+
+		migrateConn, err := pgx.Connect(ctx, postgres.DSN("migrate"))
+		if err != nil {
+			return fmt.Errorf("failed to connect to database: %w", err)
+		}
+		defer targetConn.Close(ctx)
 
 		statements, err := generateMigrationStatements(
 			ctx,
@@ -275,6 +268,7 @@ func runWithStdout(
 			tmpDir,
 			migrationsDir,
 			initial,
+			postgresConn,
 			targetConn,
 			migrateConn,
 		)
@@ -345,31 +339,39 @@ func runWithFile(
 			}
 		}
 
-		targetPostgres, targetConn, _, err := setupDatabase(ctx, tmpDir, "target", 5432)
-		defer func() {
-			if targetConn != nil {
-				_ = targetConn.Close(ctx)
-			}
-			if targetPostgres != nil {
-				_ = targetPostgres.Stop()
-			}
-		}()
+		postgres, err := setupDatabase(5432)
 		if err != nil {
-			return false, fmt.Errorf("failed to setup target database: %w", err)
+			return false, fmt.Errorf("failed to setup database: %w", err)
+		}
+		defer postgres.Stop() //nolint:errcheck
+
+		postgresConn, err := pgx.Connect(ctx, postgres.DSN("postgres"))
+		if err != nil {
+			return false, fmt.Errorf("failed to connect to database: %w", err)
+		}
+		defer postgresConn.Close(ctx)
+
+		_, err = postgresConn.Exec(ctx, "CREATE DATABASE target;")
+		if err != nil {
+			return false, fmt.Errorf("failed to create database: %w", err)
 		}
 
-		migratePostgres, migrateConn, _, err := setupDatabase(ctx, tmpDir, "migrate", 5433)
-		defer func() {
-			if migrateConn != nil {
-				_ = migrateConn.Close(ctx)
-			}
-			if migratePostgres != nil {
-				_ = migratePostgres.Stop()
-			}
-		}()
+		targetConn, err := pgx.Connect(ctx, postgres.DSN("target"))
 		if err != nil {
-			return false, fmt.Errorf("failed to setup migrate database: %w", err)
+			return false, fmt.Errorf("failed to connect to database: %w", err)
 		}
+		defer targetConn.Close(ctx)
+
+		_, err = postgresConn.Exec(ctx, "CREATE DATABASE migrate;")
+		if err != nil {
+			return false, fmt.Errorf("failed to create database: %w", err)
+		}
+
+		migrateConn, err := pgx.Connect(ctx, postgres.DSN("migrate"))
+		if err != nil {
+			return false, fmt.Errorf("failed to connect to database: %w", err)
+		}
+		defer targetConn.Close(ctx)
 
 		statements, err := generateMigrationStatements(
 			ctx,
@@ -378,6 +380,7 @@ func runWithFile(
 			tmpDir,
 			migrationsDir,
 			migrationNumber == 1,
+			postgresConn,
 			targetConn,
 			migrateConn,
 		)
@@ -465,6 +468,7 @@ func generateMigrationStatements(
 	tmpDir,
 	migrationsDir string,
 	initial bool,
+	postgresConn,
 	targetConn,
 	migrateConn *pgx.Conn,
 ) (string, error) {
@@ -490,14 +494,9 @@ func generateMigrationStatements(
 		}
 	}()
 
-	err = internal.CreateUsers(ctx, migrateConn, config.DatabaseUsers)
+	err = internalpostgres.CreateUsers(ctx, postgresConn, config.DatabaseUsers)
 	if err != nil {
-		return "", fmt.Errorf("failed to create migrate users: %w", err)
-	}
-
-	err = internal.CreateUsers(ctx, targetConn, config.DatabaseUsers)
-	if err != nil {
-		return "", fmt.Errorf("failed to create target users: %w", err)
+		return "", fmt.Errorf("failed to create users: %w", err)
 	}
 
 	err = executeTargetSQL(ctx, config, wd, targetConn)
@@ -522,7 +521,11 @@ func generateMigrationStatements(
 		return "", fmt.Errorf("failed to execute migrate sql: %w", err)
 	}
 
-	statements, err := internal.Migra(ctx, internal.DSN(migrateConn, "disable"), internal.DSN(targetConn, "disable"))
+	statements, err := internal.Migra(
+		ctx,
+		internalpostgres.DSN(migrateConn, "disable"),
+		internalpostgres.DSN(targetConn, "disable"),
+	)
 	if err != nil {
 		return "", fmt.Errorf("failed to run migra: %w", err)
 	}
@@ -563,7 +566,7 @@ func generateMigrationStatements(
 }
 
 func executeMigrateSQL(migrationsDir string, migrateConn *pgx.Conn) error {
-	m, err := migrate.New(fmt.Sprintf("file://%s", migrationsDir), internal.DSN(migrateConn, "disable"))
+	m, err := migrate.New(fmt.Sprintf("file://%s", migrationsDir), internalpostgres.DSN(migrateConn, "disable"))
 	if err != nil {
 		return fmt.Errorf("failed to create migrate: %w", err)
 	}
@@ -606,13 +609,13 @@ func generateMissingPermissionStatements(
 		"--exclude-table=public.schema_migrations",
 	}
 
-	targetDump, err := internal.PgDump(ctx, internal.DSN(targetConn, "disable"), pgDumpOptions)
+	targetDump, err := internalpostgres.PgDump(ctx, internalpostgres.DSN(targetConn, "disable"), pgDumpOptions)
 	if err != nil {
 		//nolint:wrapcheck
 		return "", err
 	}
 
-	migrateDump, err := internal.PgDump(ctx, internal.DSN(migrateConn, "disable"), pgDumpOptions)
+	migrateDump, err := internalpostgres.PgDump(ctx, internalpostgres.DSN(migrateConn, "disable"), pgDumpOptions)
 	if err != nil {
 		//nolint:wrapcheck
 		return "", err
