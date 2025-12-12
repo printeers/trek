@@ -16,19 +16,21 @@ import (
 
 const diffMaxOpenConns = 100
 
-func Diff(ctx context.Context, postgresConn, targetConn, migrateConn *pgx.Conn) (string, error) {
-	fromDB := stdlib.OpenDB(*targetConn.Config())
+// Diff generates a SQL script to migrate the schema from the 'from' database to match the 'to' database.
+// nolint:gocognit,cyclop
+func Diff(ctx context.Context, postgresConn, fromConn, toConn *pgx.Conn) (string, error) {
+	fromDB := stdlib.OpenDB(*fromConn.Config())
 	fromDB.SetMaxOpenConns(diffMaxOpenConns)
 	defer fromDB.Close()
-	err := fromDB.Ping()
+	err := fromDB.PingContext(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to open 'from database' connection: %w", err)
 	}
 
-	toDB := stdlib.OpenDB(*migrateConn.Config())
+	toDB := stdlib.OpenDB(*toConn.Config())
 	toDB.SetMaxOpenConns(diffMaxOpenConns)
 	defer toDB.Close()
-	err = toDB.Ping()
+	err = toDB.PingContext(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to open 'to database' connection: %w", err)
 	}
@@ -37,8 +39,9 @@ func Diff(ctx context.Context, postgresConn, targetConn, migrateConn *pgx.Conn) 
 	defer func() {
 		// call close funcs in inverted order (last first)
 		for i := len(deferredCloseFuncs) - 1; i >= 0; i-- {
-			if err := deferredCloseFuncs[i](); err != nil {
-				log.Printf("failed to close resource: %v", err)
+			errClose := deferredCloseFuncs[i]()
+			if errClose != nil {
+				log.Printf("failed to close resource: %v", errClose)
 			}
 		}
 	}()
@@ -47,10 +50,11 @@ func Diff(ctx context.Context, postgresConn, targetConn, migrateConn *pgx.Conn) 
 		config.Database = dbName
 		tempDB := stdlib.OpenDB(*config)
 		tempDB.SetMaxOpenConns(diffMaxOpenConns)
-		err := tempDB.Ping()
-		if err != nil {
+		errPing := tempDB.PingContext(ctx)
+		if errPing != nil {
 			tempDB.Close()
-			return nil, fmt.Errorf("failed to connect to temp database: %w", err)
+
+			return nil, fmt.Errorf("failed to connect to temp database: %w", errPing)
 		}
 		deferredCloseFuncs = append(deferredCloseFuncs, tempDB.Close)
 
@@ -64,7 +68,7 @@ func Diff(ctx context.Context, postgresConn, targetConn, migrateConn *pgx.Conn) 
 		diff.DBSchemaSource(fromDB),
 		diff.DBSchemaSource(toDB),
 		diff.WithTempDbFactory(tempFactory), // Required to validate the generated diff statements.
-		diff.WithNoConcurrentIndexOps(),     // Concurrent index creation is not available in transactions that are used by go-migrate.
+		diff.WithNoConcurrentIndexOps(),     // Concurrent index creation is not available in transactions.
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate diff plan: %w", err)
@@ -72,51 +76,42 @@ func Diff(ctx context.Context, postgresConn, targetConn, migrateConn *pgx.Conn) 
 
 	// Ignore the proposed deletion of the schema_migrations table.
 	plan.Statements = slices.DeleteFunc(plan.Statements, func(statement diff.Statement) bool {
-		if statement.DDL == `DROP TABLE "public"."schema_migrations"` {
-			return true
-		}
-		return false
+		return statement.DDL == `DROP TABLE "public"."schema_migrations"`
 	})
 
-	return planToSql(plan), nil
-}
-
-// planToSql converts the plan to one large runnable SQL script.
-//
-// This function is copied verbatim from the pg-schema-diff cmd (package main)
-// https://github.com/stripe/pg-schema-diff/blob/v1.0.2/cmd/pg-schema-diff/plan_cmd.go#L607C1-L628C2
-// TODO: We could open an issue to ask them to expose this function, although it
-// could be beneficial for trek to write our own custom sql output format.
-// Licensed MIT by pg-schema-diff
-func planToSql(plan diff.Plan) string {
 	sb := strings.Builder{}
+	var lastStatementTimeout int64
+	var lastLockTimeout int64
 	for i, stmt := range plan.Statements {
-		sb.WriteString("/*\n")
-		sb.WriteString(fmt.Sprintf("Statement %d\n", i))
-		if len(stmt.Hazards) > 0 {
-			for _, hazard := range stmt.Hazards {
-				sb.WriteString(fmt.Sprintf("  - %s\n", hazardToPrettyS(hazard)))
+		statementTimeout := stmt.Timeout.Milliseconds()
+		lockTimeout := stmt.LockTimeout.Milliseconds()
+		if lastStatementTimeout != statementTimeout || lastLockTimeout != lockTimeout {
+			if lastStatementTimeout != statementTimeout {
+				lastStatementTimeout = statementTimeout
+				sb.WriteString(fmt.Sprintf("SET SESSION statement_timeout = %d;\n", statementTimeout))
 			}
+			if lastLockTimeout != lockTimeout {
+				lastLockTimeout = lockTimeout
+				sb.WriteString(fmt.Sprintf("SET SESSION lock_timeout = %d;\n", lockTimeout))
+			}
+			sb.WriteString("\n")
 		}
-		sb.WriteString("*/\n")
-		sb.WriteString(fmt.Sprintf("SET SESSION statement_timeout = %d;\n", stmt.Timeout.Milliseconds()))
-		sb.WriteString(fmt.Sprintf("SET SESSION lock_timeout = %d;\n", stmt.LockTimeout.Milliseconds()))
-		sb.WriteString(fmt.Sprintf("%s;", stmt.DDL))
+		if len(stmt.Hazards) > 0 {
+			sb.WriteString("/* Hazards:\n")
+			for _, hazard := range stmt.Hazards {
+				if hazard.Message != "" {
+					sb.WriteString(fmt.Sprintf(" - %s: %s\n", hazard.Type, hazard.Message))
+				} else {
+					sb.WriteString(fmt.Sprintf(" - %s\n", hazard.Type))
+				}
+			}
+			sb.WriteString("*/\n")
+		}
+		sb.WriteString(fmt.Sprintf("%s;\n", stmt.DDL))
 		if i < len(plan.Statements)-1 {
-			sb.WriteString("\n\n")
+			sb.WriteString("\n")
 		}
 	}
-	return sb.String()
-}
 
-// hazardToPrettyS converts a migration hazard to a pretty string.
-//
-// Copied verbatim from the pg-schema-diff cmd, together with planToSql.
-// Licensed MIT by pg-schema-diff
-func hazardToPrettyS(hazard diff.MigrationHazard) string {
-	if len(hazard.Message) > 0 {
-		return fmt.Sprintf("%s: %s", hazard.Type, hazard.Message)
-	} else {
-		return hazard.Type
-	}
+	return sb.String(), nil
 }

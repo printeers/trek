@@ -584,6 +584,7 @@ func executeTargetSQL(ctx context.Context, config *internal.Config, wd string, t
 // for the given target and migration connections. This feature is not yet
 // available in pg-schema-diff, but planned.
 //
+// nolint:godox
 // TODO: This function should probably be moved to the internal package.
 func generateMissingPermissionStatements(
 	ctx context.Context,
