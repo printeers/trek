@@ -33,7 +33,7 @@ func (p *postgresDatabaseEmbedded) Start(port uint32) error {
 		embeddedpostgres.
 			DefaultConfig().
 			Logger(&buf).
-			Version(internal.PgversionEmbeddedpostgres). // keep in sync with pgmodeler.go
+			Version(internal.PgversionEmbeddedpostgres).
 			RuntimePath(tmpDir).
 			Username("postgres").
 			Password("postgres").

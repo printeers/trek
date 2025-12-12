@@ -521,27 +521,15 @@ func generateMigrationStatements(
 		return "", fmt.Errorf("failed to execute migrate sql: %w", err)
 	}
 
-	statements, err := internal.Migra(
+	statements, err := internal.Diff(
 		ctx,
-		internalpostgres.DSN(migrateConn, "disable"),
-		internalpostgres.DSN(targetConn, "disable"),
+		postgresConn,
+		migrateConn,
+		targetConn,
 	)
 	if err != nil {
-		return "", fmt.Errorf("failed to run migra: %w", err)
+		return "", fmt.Errorf("failed to diff: %w", err)
 	}
-
-	// Filter stuff from go-migrate that doesn't exist in the target db, and we don't have and need anyway
-	filter := []string{
-		`alter table "public"."schema_migrations" drop constraint "schema_migrations_dirty_not_null";` + "\n\n",
-		`alter table "public"."schema_migrations" drop constraint "schema_migrations_version_not_null";` + "\n\n",
-		`alter table "public"."schema_migrations" drop constraint "schema_migrations_pkey";` + "\n\n",
-		`drop index if exists "public"."schema_migrations_pkey";` + "\n\n",
-		`drop table "public"."schema_migrations";` + "\n\n",
-	}
-	for _, f := range filter {
-		statements = strings.ReplaceAll(statements, f, "")
-	}
-	statements = strings.Trim(statements, "\n")
 
 	extraStatements, err := generateMissingPermissionStatements(ctx, tmpDir, statements, targetConn, migrateConn)
 	if err != nil {
@@ -592,6 +580,11 @@ func executeTargetSQL(ctx context.Context, config *internal.Config, wd string, t
 	return nil
 }
 
+// generateMissingPermissionStatements generates missing permission statements
+// for the given target and migration connections. This feature is not yet
+// available in pg-schema-diff, but planned.
+//
+// TODO: This function should probably be moved to the internal package.
 func generateMissingPermissionStatements(
 	ctx context.Context,
 	tmpDir,

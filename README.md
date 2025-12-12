@@ -29,17 +29,7 @@ Or use a [released docker image](https://github.com/printeers/trek/pkgs/containe
 
 ## Dependencies
 
-Running `trek generate` requires to have `migra` and `pgmodeler-cli` installed. Trek will try to locate these in the `$PATH` of the user.
-
-If `migra` cannot be found, trek will try use versions of this binary that is embedded into the trek build. The user can skip searching for `migra` in the path by setting `TREK_FORCE_EMBEDDED_MIGRA`. For example:
-
-```bash
-trek --force-embedded-migra=true generate --stdout
-```
-
-_Note that the embedded migra is [built using a patched schemainspect library](internal/embedded/migra/build-migra.Dockerfile), which is [awaiting upstream merge](https://github.com/djrobstep/schemainspect/pull/67)._
-
-_Note also that we should probably migrate from migra to [results](https://github.com/djrobstep/results)._
+Trek requires to have `psql`, `pg_dump` and `pgmodeler-cli` installed. Trek will try to locate these in the `$PATH` of the user.
 
 ## MacOS / Windows
 
