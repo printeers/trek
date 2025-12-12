@@ -72,4 +72,8 @@ Take a look at the `example/` directory.
 
 ## History
 
-`trek` was originally developed by [Stack11](https://github.com/stack11). In april 2023 [Printeers](https://printeers.com) adopted the project for further development and maintenance.
+`trek` was originally developed at [Stack11](https://github.com/stack11). In april 2023 [Printeers](https://printeers.com) adopted the project for further development and maintenance.
+
+## License
+
+Copyright 2021 [The Trek Authors](https://github.com/printeers/trek/graphs/contributors). Available under the [AGPL 3.0 license](./LICENSE).
