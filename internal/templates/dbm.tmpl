@@ -5,7 +5,7 @@ CAUTION: Do not modify this file unless you know what you are doing.
 -->
 <dbmodel pgmodeler-ver="0.9.4" use-changelog="false" last-position="0,0" last-zoom="1" max-obj-count="4"
 	 default-owner="postgres">
-{{range .db_users}}
+{{range .roleNames}}
 <role name="{{.}}" sql-disabled="true" />{{end}}
 
 <database name="{{.db_name}}" is-template="false" allow-conns="true" sql-disabled="true"/>

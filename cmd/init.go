@@ -14,20 +14,21 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/printeers/trek/internal"
+	"github.com/printeers/trek/internal/configuration"
 	"github.com/printeers/trek/internal/templates"
 )
 
 var errInvalidModelName = errors.New("invalid model name")
 var errInvalidDatabaseName = errors.New("invalid database name")
-var errInvalidDatabaseUsersList = errors.New("invalid database users list")
+var errInvalidRolesList = errors.New("invalid roles list")
 
 //nolint:gocognit,cyclop
 func NewInitCommand() *cobra.Command {
 	var (
-		version       string
-		modelName     string
-		databaseName  string
-		databaseUsers string
+		version      string
+		modelName    string
+		databaseName string
+		roleNames    string
 	)
 	initCmd := &cobra.Command{
 		Use:   "init",
@@ -54,7 +55,7 @@ func NewInitCommand() *cobra.Command {
 				}
 			}
 
-			if modelName == "" || databaseName == "" || databaseUsers == "" {
+			if modelName == "" || databaseName == "" || roleNames == "" {
 				fmt.Printf("The following answers can only contain a-z and _\n")
 			}
 
@@ -88,26 +89,26 @@ func NewInitCommand() *cobra.Command {
 				}
 			}
 
-			if databaseUsers != "" {
-				if err = validateDatabaseUsers(databaseUsers); err != nil {
-					return fmt.Errorf("invalid database users %q: %w", databaseUsers, err)
+			if roleNames != "" {
+				if err = validateRoles(roleNames); err != nil {
+					return fmt.Errorf("invalid roles %q: %w", roleNames, err)
 				}
 			} else {
 				dbUsersPrompt := promptui.Prompt{
-					Label:    "Database users (comma separated)",
-					Validate: validateDatabaseUsers,
+					Label:    "Roles (comma separated)",
+					Validate: validateRoles,
 				}
-				databaseUsers, err = dbUsersPrompt.Run()
+				roleNames, err = dbUsersPrompt.Run()
 				if err != nil {
-					return fmt.Errorf("failed to prompt database users: %w", err)
+					return fmt.Errorf("failed to prompt roles: %w", err)
 				}
 			}
 
-			templateData := map[string]interface{}{
+			templateData := map[string]any{
 				"trek_version": version,
 				"model_name":   modelName,
 				"db_name":      databaseName,
-				"db_users":     strings.Split(databaseUsers, ","),
+				"roleNames":    strings.Split(roleNames, ","),
 			}
 
 			for file, tmpl := range map[string]string{
@@ -147,7 +148,7 @@ func NewInitCommand() *cobra.Command {
 
 			log.Println("New project created!")
 
-			config, err := internal.ReadConfig(wd)
+			config, err := configuration.ReadConfig(wd)
 			if err != nil {
 				return fmt.Errorf("failed to read config: %w", err)
 			}
@@ -175,13 +176,13 @@ func NewInitCommand() *cobra.Command {
 	initCmd.Flags().StringVar(&version, "version", "", "Trek version to use (in the Dockerfile)")
 	initCmd.Flags().StringVar(&modelName, "model-name", "", "Model (file) name")
 	initCmd.Flags().StringVar(&databaseName, "database-name", "", "Database name")
-	initCmd.Flags().StringVar(&databaseUsers, "database-users", "", "Database users")
+	initCmd.Flags().StringVar(&roleNames, "roles", "", "Roles")
 
 	return initCmd
 }
 
 func validateModelName(s string) error {
-	if !internal.ValidateIdentifier(s) {
+	if !configuration.ValidateIdentifier(s) {
 		return errInvalidModelName
 	}
 
@@ -189,22 +190,22 @@ func validateModelName(s string) error {
 }
 
 func validateDatabaseName(s string) error {
-	if !internal.ValidateIdentifier(s) {
+	if !configuration.ValidateIdentifier(s) {
 		return errInvalidDatabaseName
 	}
 
 	return nil
 }
 
-func validateDatabaseUsers(s string) error {
-	if !internal.ValidateIdentifierList(strings.Split(s, ",")) {
-		return errInvalidDatabaseUsersList
+func validateRoles(s string) error {
+	if !configuration.ValidateIdentifierList(strings.Split(s, ",")) {
+		return errInvalidRolesList
 	}
 
 	return nil
 }
 
-func writeTemplateFile(ts, filename string, templateData map[string]interface{}) error {
+func writeTemplateFile(ts, filename string, templateData map[string]any) error {
 	t, err := template.New(filename).Parse(ts)
 	if err != nil {
 		return fmt.Errorf("failed to parse template: %w", err)

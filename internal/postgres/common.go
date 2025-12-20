@@ -9,14 +9,14 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type Database interface {
+type Instance interface {
 	Start(port uint32) error
 	Stop() error
 	DSN(database string) string
 }
 
-func NewPostgresDatabase() Database {
-	db := &postgresDatabaseEmbedded{}
+func NewPostgresInstance() Instance {
+	db := &postgresInstanceEmbedded{}
 
 	return db
 }
@@ -63,60 +63,49 @@ func PsqlFile(ctx context.Context, dsn, file string) error {
 	return nil
 }
 
-func CreateUsers(ctx context.Context, conn *pgx.Conn, users []string) error {
-	for _, u := range users {
-		_, err := conn.Exec(ctx, fmt.Sprintf("CREATE ROLE %q WITH LOGIN;", u))
-		if err != nil {
-			return fmt.Errorf("failed to create user: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func CheckDatabaseExists(ctx context.Context, conn *pgx.Conn, user string) (bool, error) {
-	a := conn.QueryRow(
+func CheckDatabaseExists(ctx context.Context, conn *pgx.Conn, database string) (bool, error) {
+	row := conn.QueryRow(
 		ctx,
-		fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname='%s');", user),
+		fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname='%s');", database),
 	)
 
-	var b bool
-	err := a.Scan(&b)
+	var exists bool
+	err := row.Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("failed to decode row: %w", err)
 	}
 
-	return b, nil
+	return exists, nil
 }
 
-func CheckUserExists(ctx context.Context, conn *pgx.Conn, user string) (bool, error) {
-	a := conn.QueryRow(
+func CheckRoleExists(ctx context.Context, conn *pgx.Conn, role string) (bool, error) {
+	row := conn.QueryRow(
 		ctx,
-		fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='%s');", user),
+		fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='%s');", role),
 	)
 
-	var b bool
-	err := a.Scan(&b)
+	var exists bool
+	err := row.Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("failed to decode row: %w", err)
 	}
 
-	return b, nil
+	return exists, nil
 }
 
 func CheckTableExists(ctx context.Context, conn *pgx.Conn, schema, name string) (bool, error) {
-	a := conn.QueryRow(
+	row := conn.QueryRow(
 		ctx,
 		fmt.Sprintf("SELECT EXISTS(SELECT FROM pg_tables WHERE schemaname = '%s' AND tablename = '%s');", schema, name),
 	)
 
-	var b bool
-	err := a.Scan(&b)
+	var exists bool
+	err := row.Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("failed to decode row: %w", err)
 	}
 
-	return b, nil
+	return exists, nil
 }
 
 func DSN(conn *pgx.Conn, sslmode string) string {

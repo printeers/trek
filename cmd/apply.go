@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
+	"github.com/printeers/trek/internal/configuration"
 	internalpostgres "github.com/printeers/trek/internal/postgres"
 
 	// needed driver.
@@ -49,7 +50,7 @@ func NewApplyCommand() *cobra.Command {
 				return fmt.Errorf("failed to get working directory: %w", err)
 			}
 
-			config, err := internal.ReadConfig(wd)
+			config, err := configuration.ReadConfig(wd)
 			if err != nil {
 				return fmt.Errorf("failed to read config: %w", err)
 			}
@@ -95,17 +96,15 @@ func NewApplyCommand() *cobra.Command {
 				}
 			}
 
-			for _, u := range config.DatabaseUsers {
-				var userExists bool
-				userExists, err = internalpostgres.CheckUserExists(ctx, conn, u)
+			for _, role := range config.Roles {
+				var roleExists bool
+				roleExists, err = internalpostgres.CheckRoleExists(ctx, conn, role.Name)
 				if err != nil {
-					return fmt.Errorf("failed to check if user exists: %w", err)
+					return fmt.Errorf("failed to check if role exists: %w", err)
 				}
-				if !userExists {
-					_, err = conn.Exec(ctx, fmt.Sprintf("CREATE ROLE %q WITH LOGIN", u))
-					if err != nil {
-						return fmt.Errorf("failed to create user: %w", err)
-					}
+				if !roleExists {
+					//nolint:err113
+					return fmt.Errorf("expected role %q to be created but it does not exist", role.Name)
 				}
 			}
 
@@ -194,10 +193,10 @@ func NewApplyCommand() *cobra.Command {
 				return fmt.Errorf("failed to connect to database: %w", err)
 			}
 
-			for _, u := range config.DatabaseUsers {
-				_, err = conn.Exec(ctx, fmt.Sprintf("GRANT SELECT ON public.schema_migrations TO %q", u))
+			for _, role := range config.Roles {
+				_, err = conn.Exec(ctx, fmt.Sprintf("GRANT SELECT ON public.schema_migrations TO %q", role.Name))
 				if err != nil {
-					return fmt.Errorf("failed to grant select permission on schema_migrations to %q: %w", u, err)
+					return fmt.Errorf("failed to grant select permission on schema_migrations to role %q: %w", role.Name, err)
 				}
 			}
 

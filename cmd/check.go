@@ -15,7 +15,8 @@ import (
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/jackc/pgx/v5"
-	internalpostgres "github.com/printeers/trek/internal/postgres"
+	"github.com/printeers/trek/internal/configuration"
+	"github.com/printeers/trek/internal/postgres"
 
 	// needed driver.
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -41,7 +42,7 @@ func NewCheckCommand() *cobra.Command {
 				return fmt.Errorf("failed to get working directory: %w", err)
 			}
 
-			config, err := internal.ReadConfig(wd)
+			config, err := configuration.ReadConfig(wd)
 			if err != nil {
 				return fmt.Errorf("failed to read config: %w", err)
 			}
@@ -61,35 +62,28 @@ func NewCheckCommand() *cobra.Command {
 //nolint:cyclop
 func checkAll(
 	ctx context.Context,
-	config *internal.Config,
+	config *configuration.Config,
 	wd,
 	migrationsDir string,
 ) error {
-	postgres, err := setupDatabase(5434)
+	tmpPostgres, err := setupPostgresInstance(5434)
 	if err != nil {
-		return fmt.Errorf("failed to setup database: %w", err)
+		return fmt.Errorf("failed to setup tmp database: %w", err)
 	}
-	defer postgres.Stop() //nolint:errcheck
+	defer tmpPostgres.Stop() //nolint:errcheck
 
-	dsn := postgres.DSN("postgres")
+	tmpPostgresDSN := tmpPostgres.DSN("postgres")
 
-	conn, err := pgx.Connect(ctx, dsn)
+	conn, err := pgx.Connect(ctx, tmpPostgresDSN)
 	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
+		return fmt.Errorf("failed to connect to tmp database: %w", err)
 	}
 	defer conn.Close(ctx)
 
-	for _, u := range config.DatabaseUsers {
-		var userExists bool
-		userExists, err = internalpostgres.CheckUserExists(ctx, conn, u)
+	for _, role := range config.Roles {
+		_, err = conn.Exec(ctx, fmt.Sprintf("CREATE ROLE %q WITH LOGIN PASSWORD 'postgres'", role.Name))
 		if err != nil {
-			return fmt.Errorf("failed to check if user exists: %w", err)
-		}
-		if !userExists {
-			_, err = conn.Exec(ctx, fmt.Sprintf("CREATE ROLE %q WITH LOGIN PASSWORD 'postgres'", u))
-			if err != nil {
-				return fmt.Errorf("failed to create user: %w", err)
-			}
+			return fmt.Errorf("failed to create role %q: %w", role.Name, err)
 		}
 	}
 
@@ -137,16 +131,9 @@ func checkAll(
 
 	log.Println("Checking migrations and testdata")
 
-	err = checkMigrationsAndTestdata(ctx, wd, migrationsDir, dsn, migrationFiles)
+	err = checkMigrationsAndTestdata(ctx, wd, migrationsDir, tmpPostgresDSN, migrationFiles)
 	if err != nil {
 		return fmt.Errorf("failed to check migrations and testdata: %w", err)
-	}
-
-	for _, u := range config.DatabaseUsers {
-		_, err = conn.Exec(ctx, fmt.Sprintf("GRANT SELECT ON public.schema_migrations TO %q", u))
-		if err != nil {
-			return fmt.Errorf("failed to grant select permission on schema_migrations to %q: %w", u, err)
-		}
 	}
 
 	err = internal.RunHook(ctx, wd, "check-post", hookOptions)
@@ -157,7 +144,7 @@ func checkAll(
 	return nil
 }
 
-func checkDBM(config *internal.Config, wd string) error {
+func checkDBM(config *configuration.Config, wd string) error {
 	model := dbm.DBModel{}
 
 	m, err := os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName)))
@@ -170,31 +157,34 @@ func checkDBM(config *internal.Config, wd string) error {
 		return fmt.Errorf("failed to parse model: %w", err)
 	}
 
-	modelRoles := map[string]struct{}{}
+	modelRoles := map[string]dbm.Role{}
 	for _, role := range model.Roles {
-		if !role.SQLDisabled {
-			//nolint:err113
-			return fmt.Errorf("role %q has sql enabled", role.Name)
-		}
-		modelRoles[role.Name] = struct{}{}
+		modelRoles[role.Name] = role
 	}
 
-	configRoles := map[string]struct{}{}
-	for _, role := range config.DatabaseUsers {
-		configRoles[role] = struct{}{}
+	configRoles := map[string]configuration.Role{}
+	for _, role := range config.Roles {
+		configRoles[role.Name] = role
 	}
 
 	for role := range modelRoles {
 		if _, ok := configRoles[role]; !ok {
 			//nolint:err113
-			return fmt.Errorf("role %q defined in the model not defined in the config", role)
+			return fmt.Errorf("role %q is defined in the model but is not defined in the config", role)
 		}
 	}
 
 	for role := range configRoles {
 		if _, ok := modelRoles[role]; !ok {
 			//nolint:err113
-			return fmt.Errorf("role %q defined in the config not defined in the model", role)
+			return fmt.Errorf("role %q is defined in the config but is not defined in the model", role)
+		}
+	}
+
+	for _, role := range model.Roles {
+		if !role.SQLDisabled {
+			//nolint:err113
+			return fmt.Errorf("role %q is missing 'sql disabled' in the model (sql must not be generated for a role)", role.Name)
 		}
 	}
 
@@ -250,7 +240,7 @@ func checkMigrationFileNames(migrationFiles []string) error {
 	return nil
 }
 
-func checkTemplates(config *internal.Config, migrationsCount uint) error {
+func checkTemplates(config *configuration.Config, migrationsCount uint) error {
 	for _, ts := range config.Templates {
 		if _, err := os.Stat(ts.Path); errors.Is(err, os.ErrNotExist) {
 			//nolint:err113
@@ -297,7 +287,7 @@ func checkMigrationsAndTestdata(ctx context.Context, wd, migrationsDir, dsn stri
 			if strings.HasPrefix(path.Base(p), fmt.Sprintf("%03d", index+1)) {
 				// We have to use psql, because users might use commands like "\copy"
 				// which don't work by directly connecting to the database
-				err := internalpostgres.PsqlFile(ctx, dsn, p)
+				err := postgres.PsqlFile(ctx, dsn, p)
 				if err != nil {
 					//nolint:err113
 					return fmt.Errorf("failed to apply testdata: %w", err)

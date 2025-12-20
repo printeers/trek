@@ -9,15 +9,15 @@ import (
 	"github.com/printeers/trek/internal"
 )
 
-var _ Database = &postgresDatabaseEmbedded{}
+var _ Instance = &postgresInstanceEmbedded{}
 
-type postgresDatabaseEmbedded struct {
+type postgresInstanceEmbedded struct {
 	port   uint32
 	db     *embeddedpostgres.EmbeddedPostgres
 	tmpDir string
 }
 
-func (p *postgresDatabaseEmbedded) Start(port uint32) error {
+func (p *postgresInstanceEmbedded) Start(port uint32) error {
 	p.port = port
 
 	var buf bytes.Buffer
@@ -49,7 +49,7 @@ func (p *postgresDatabaseEmbedded) Start(port uint32) error {
 	return nil
 }
 
-func (p *postgresDatabaseEmbedded) Stop() error {
+func (p *postgresInstanceEmbedded) Stop() error {
 	err := p.db.Stop()
 	if err != nil {
 		return fmt.Errorf("failed to stop database: %w", err)
@@ -68,6 +68,6 @@ func (p *postgresDatabaseEmbedded) Stop() error {
 	return nil
 }
 
-func (p *postgresDatabaseEmbedded) DSN(database string) string {
+func (p *postgresInstanceEmbedded) DSN(database string) string {
 	return fmt.Sprintf("postgres://postgres:postgres@127.0.0.1:%d/%s?sslmode=disable", p.port, database)
 }
