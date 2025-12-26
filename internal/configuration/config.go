@@ -1,4 +1,4 @@
-package internal
+package configuration
 
 import (
 	"errors"
@@ -22,8 +22,11 @@ type Config struct {
 	//nolint:tagliatelle
 	DatabaseName string `yaml:"db_name"`
 	//nolint:tagliatelle
-	DatabaseUsers []string   `yaml:"db_users"`
-	Templates     []Template `yaml:"templates"`
+	Roles     []Role     `yaml:"roles"`
+	Templates []Template `yaml:"templates"`
+}
+type Role struct {
+	Name string `yaml:"name"`
 }
 
 type Template struct {
@@ -69,10 +72,10 @@ func (c *Config) validate() (problems []string) {
 		)
 		problems = append(problems, p)
 	}
-	for _, user := range c.DatabaseUsers {
-		if !ValidateIdentifier(user) {
+	for _, role := range c.Roles {
+		if !ValidateIdentifier(role.Name) {
 			p := fmt.Sprintf("Database user %q contains invalid characters. Must match %q.",
-				user,
+				role,
 				regexpStringValidIdentifier,
 			)
 			problems = append(problems, p)

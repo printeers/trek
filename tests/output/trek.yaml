@@ -1,5 +1,5 @@
 model_name: santas_warehouse
 db_name: north_pole
-db_users:
-  - santa
-  - worker
+roles:
+  - name: santa
+  - name: worker
