@@ -104,7 +104,7 @@ func NewApplyCommand() *cobra.Command {
 				}
 				if !roleExists {
 					//nolint:err113
-					return fmt.Errorf("expected role %q to be created but it does not exist", role.Name)
+					return fmt.Errorf("expected role %q to exists but it does not exist", role.Name)
 				}
 			}
 
