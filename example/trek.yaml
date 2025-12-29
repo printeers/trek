@@ -1,5 +1,5 @@
 model_name: foo
 db_name: bar
-db_users:
-  - alice
-  - bob
+roles:
+  - name: alice
+  - name: bob
