@@ -53,9 +53,9 @@ Inside a directory create `trek.yaml`:
 ```yaml
 model_name: <model_name>
 db_name: <db_name>
-db_users:
-  - <db_user_1>
-  - <db_user_2>
+roles:
+  - name: db_user_1
+  - name: db_user_2
 ```
 
 Create `<model_name>.dbm` using pgModeler.
