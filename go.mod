@@ -1,6 +1,6 @@
 module github.com/printeers/trek
 
-go 1.24.0
+go 1.25.5
 
 require (
 	github.com/fergusstrange/embedded-postgres v1.33.0
@@ -10,7 +10,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
-	github.com/stripe/pg-schema-diff v1.0.2
+	github.com/stripe/pg-schema-diff v1.0.3
 	gopkg.in/yaml.v2 v2.4.0
 )
 
