@@ -69,6 +69,7 @@ func Diff(ctx context.Context, postgresConn, fromConn, toConn *pgx.Conn) (string
 		diff.DBSchemaSource(toDB),
 		diff.WithTempDbFactory(tempFactory), // Required to validate the generated diff statements.
 		diff.WithNoConcurrentIndexOps(),     // Concurrent index creation is not available in transactions.
+		diff.WithDoNotValidatePlan(),        // See https://github.com/stripe/pg-schema-diff/issues/266
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate diff plan: %w", err)
