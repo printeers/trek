@@ -23,8 +23,8 @@ RUN apt update && \
         postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd --gid 1000 nonroot && \
-    useradd --create-home --shell /bin/bash --uid 1000 --gid 1000 nonroot
+RUN groupadd --gid 1001 nonroot && \
+    useradd --create-home --shell /bin/bash --uid 1001 --gid 1001 nonroot
 USER nonroot
 
 RUN mkdir /home/nonroot/.cache
