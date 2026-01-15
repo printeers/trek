@@ -24,7 +24,9 @@ type Config struct {
 	//nolint:tagliatelle
 	Roles     []Role     `yaml:"roles"`
 	Templates []Template `yaml:"templates"`
+	Output    *Output    `yaml:"output"`
 }
+
 type Role struct {
 	Name string `yaml:"name"`
 }
@@ -32,6 +34,16 @@ type Role struct {
 type Template struct {
 	Path    string `yaml:"path"`
 	Content string `yaml:"content"`
+}
+
+type OutputFile struct {
+	Path string `yaml:"path"`
+}
+
+type Output struct {
+	SQL *OutputFile `yaml:"sql"`
+	PNG *OutputFile `yaml:"png"`
+	SVG *OutputFile `yaml:"svg"`
 }
 
 func ReadConfig(wd string) (*Config, error) {
@@ -83,6 +95,38 @@ func (c *Config) validate() (problems []string) {
 	}
 
 	return problems
+}
+
+// GetOutputPath returns the output path for the given type if enabled, or empty string if not.
+// The outputType must be one of: "sql", "png", "svg". Panics if an invalid outputType is provided.
+func (c *Config) GetOutputPath(outputType string) string {
+	if c.Output == nil {
+		return ""
+	}
+
+	var outputFile *OutputFile
+
+	switch outputType {
+	case "sql":
+		outputFile = c.Output.SQL
+	case "png":
+		outputFile = c.Output.PNG
+	case "svg":
+		outputFile = c.Output.SVG
+	default:
+		panic(fmt.Sprintf("invalid output type: %q", outputType))
+	}
+
+	if outputFile == nil {
+		return ""
+	}
+
+	if outputFile.Path != "" {
+		return outputFile.Path
+	}
+
+	// Default path: {model_name}.gen.{ext}
+	return fmt.Sprintf("%s.gen.%s", c.ModelName, outputType)
 }
 
 func ValidateIdentifier(identifier string) bool {
