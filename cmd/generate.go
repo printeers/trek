@@ -20,14 +20,28 @@ import (
 	"github.com/printeers/trek/internal/postgres"
 )
 
+// ExitError is an error that carries a specific exit code.
+type ExitError struct {
+	Code    int
+	Message string
+}
+
+func (e *ExitError) Error() string {
+	return e.Message
+}
+
+// ErrDiffDetected is returned by generate when diff statements are generated.
+var ErrDiffDetected = &ExitError{Code: 2, Message: "diff statements detected"}
+
 //nolint:gocognit,cyclop
 func NewGenerateCommand() *cobra.Command {
 	var (
-		dev       bool
-		cleanup   bool
-		overwrite bool
-		stdout    bool
-		check     bool
+		dev         bool
+		cleanup     bool
+		overwrite   bool
+		stdout      bool
+		check       bool
+		errorOnDiff bool
 	)
 
 	generateCmd := &cobra.Command{
@@ -99,7 +113,7 @@ func NewGenerateCommand() *cobra.Command {
 						}
 					}
 
-					err = runWithStdout(ctx, config, wd, tmpDir, migrationsDir, len(migrationFiles) == 0)
+					err = runWithStdout(ctx, config, wd, tmpDir, migrationsDir, len(migrationFiles) == 0, errorOnDiff)
 					if err != nil {
 						return err
 					}
@@ -115,7 +129,7 @@ func NewGenerateCommand() *cobra.Command {
 						return fmt.Errorf("failed to create temporary directory: %w", err)
 					}
 
-					err = runWithStdout(ctx, config, wd, tmpDir, migrationsDir, len(migrationFiles) == 0)
+					err = runWithStdout(ctx, config, wd, tmpDir, migrationsDir, len(migrationFiles) == 0, errorOnDiff)
 					if err != nil {
 						return err
 					}
@@ -156,7 +170,8 @@ func NewGenerateCommand() *cobra.Command {
 					}
 
 					var updated bool
-					updated, err = runWithFile(ctx, config, wd, tmpDir, migrationsDir, newMigrationFilePath, migrationNumber)
+					updated, err = runWithFile(
+						ctx, config, wd, tmpDir, migrationsDir, newMigrationFilePath, migrationNumber, errorOnDiff)
 					if err != nil {
 						return err
 					}
@@ -200,6 +215,7 @@ func NewGenerateCommand() *cobra.Command {
 	generateCmd.Flags().BoolVar(&overwrite, "overwrite", false, "Overwrite existing files")
 	generateCmd.Flags().BoolVar(&stdout, "stdout", false, "Output migration statements to stdout")
 	generateCmd.Flags().BoolVar(&check, "check", true, "Run checks after generating the migration")
+	generateCmd.Flags().BoolVar(&errorOnDiff, "error-on-diff", false, "Exit with code 2 if diff statements are generated")
 
 	return generateCmd
 }
@@ -222,6 +238,7 @@ func runWithStdout(
 	tmpDir,
 	migrationsDir string,
 	initial bool,
+	errorOnDiff bool,
 ) error {
 	updated, err := checkIfUpdated(config, wd)
 	if err != nil {
@@ -313,6 +330,10 @@ func runWithStdout(
 		fmt.Println("--")
 		fmt.Println(statements)
 		fmt.Println("--")
+
+		if errorOnDiff && statements != "" {
+			return ErrDiffDetected
+		}
 	}
 
 	return nil
@@ -327,6 +348,7 @@ func runWithFile(
 	migrationsDir,
 	newMigrationFilePath string,
 	migrationNumber uint,
+	errorOnDiff bool,
 ) (bool, error) {
 	updated, err := checkIfUpdated(config, wd)
 	if err != nil {
@@ -410,6 +432,10 @@ func runWithFile(
 		err = writeTemplateFiles(config, migrationNumber)
 		if err != nil {
 			return false, fmt.Errorf("failed to write template files: %w", err)
+		}
+
+		if errorOnDiff && statements != "" {
+			return true, ErrDiffDetected
 		}
 
 		return true, nil
