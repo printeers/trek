@@ -3,3 +3,6 @@ db_name: bar
 roles:
   - name: alice
   - name: bob
+output:
+  sql: {}
+  svg: {}

@@ -3,3 +3,6 @@ db_name: north_pole
 roles:
   - name: santa
   - name: worker
+output:
+  sql: {}
+  svg: {}

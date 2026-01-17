@@ -487,7 +487,7 @@ var (
 	modelContent = ""
 )
 
-//nolint:cyclop
+//nolint:cyclop,gocognit
 func generateMigrationStatements(
 	ctx context.Context,
 	config *configuration.Config,
@@ -501,25 +501,41 @@ func generateMigrationStatements(
 ) (string, error) {
 	log.Println("Generating migration statements")
 
-	err := internal.PgModelerExportToFile(
-		ctx,
-		filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName)),
-		filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)),
-	)
+	dbmPath := filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName))
+	// Generate SQL file in tmpDir for internal use during migration generation
+	tmpSQLPath := filepath.Join(tmpDir, fmt.Sprintf("%s.sql", config.ModelName))
+
+	err := internal.PgmodelerExportSQL(ctx, dbmPath, tmpSQLPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to export model: %w", err)
 	}
 
-	go func() {
-		err = internal.PgModelerExportToPng(
-			ctx,
-			filepath.Join(wd, fmt.Sprintf("%s.dbm", config.ModelName)),
-			filepath.Join(wd, fmt.Sprintf("%s.png", config.ModelName)),
-		)
+	// Copy SQL to output path if enabled
+	if sqlPath := config.GetOutputPath("sql"); sqlPath != "" {
+		var sqlContent []byte
+		sqlContent, err = os.ReadFile(tmpSQLPath)
 		if err != nil {
-			log.Printf("Failed to export png: %v\n", err)
+			return "", fmt.Errorf("failed to read sql file: %w", err)
 		}
-	}()
+		err = os.WriteFile(filepath.Join(wd, sqlPath), sqlContent, 0o644) //nolint:gosec
+		if err != nil {
+			return "", fmt.Errorf("failed to write sql output file: %w", err)
+		}
+	}
+
+	if pngPath := config.GetOutputPath("png"); pngPath != "" {
+		err = internal.PgmodelerExportPNG(ctx, dbmPath, filepath.Join(wd, pngPath))
+		if err != nil {
+			return "", fmt.Errorf("failed to export png: %w", err)
+		}
+	}
+
+	if svgPath := config.GetOutputPath("svg"); svgPath != "" {
+		err = internal.PgmodelerExportSVG(ctx, dbmPath, filepath.Join(wd, svgPath))
+		if err != nil {
+			return "", fmt.Errorf("failed to export svg: %w", err)
+		}
+	}
 
 	for _, role := range config.Roles {
 		_, err = targetConn.Exec(ctx, fmt.Sprintf("CREATE ROLE %q WITH LOGIN;", role.Name))
@@ -528,28 +544,20 @@ func generateMigrationStatements(
 		}
 	}
 
-	err = executeTargetSQL(ctx, config, wd, targetConn)
+	err = executeTargetSQL(ctx, tmpSQLPath, targetConn)
 	if err != nil {
 		return "", fmt.Errorf("failed to execute target sql: %w", err)
 	}
 
-	if initial {
-		// If we are developing the schema initially, there will be no diffs,
-		// and we want to copy over the schema file to the initial migration file
-		var input []byte
-		input, err = os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)))
+	// Apply existing migrations to the migrate database (skip if no migrations exist yet)
+	if !initial {
+		err = executeMigrateSQL(migrationsDir, migrateConn)
 		if err != nil {
-			return "", fmt.Errorf("failed to read sql file: %w", err)
+			return "", fmt.Errorf("failed to execute migrate sql: %w", err)
 		}
-
-		return string(input), nil
 	}
 
-	err = executeMigrateSQL(migrationsDir, migrateConn)
-	if err != nil {
-		return "", fmt.Errorf("failed to execute migrate sql: %w", err)
-	}
-
+	// Generate diff between migrate database (with existing migrations) and target database (with full schema)
 	statements, err := internal.Diff(
 		ctx,
 		postgresConn,
@@ -595,8 +603,8 @@ func executeMigrateSQL(migrationsDir string, migrateConn *pgx.Conn) error {
 	return nil
 }
 
-func executeTargetSQL(ctx context.Context, config *configuration.Config, wd string, targetConn *pgx.Conn) error {
-	targetSQL, err := os.ReadFile(filepath.Join(wd, fmt.Sprintf("%s.sql", config.ModelName)))
+func executeTargetSQL(ctx context.Context, sqlPath string, targetConn *pgx.Conn) error {
+	targetSQL, err := os.ReadFile(sqlPath)
 	if err != nil {
 		return fmt.Errorf("failed to read target sql: %w", err)
 	}
