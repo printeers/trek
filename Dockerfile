@@ -14,7 +14,8 @@ RUN go build -o dist/bin/trek .
 
 
 FROM alpine:latest AS release
-RUN apk add postgresql-client bash
+# Install PostgreSQL 18 client (must match embedded postgres version)
+RUN apk add postgresql18-client bash
 COPY --from=build /trek/dist/bin/trek /usr/local/bin/trek
 
 RUN adduser -D -u 1001 unprivileged

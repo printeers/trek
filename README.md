@@ -17,6 +17,10 @@ Trek is an opinionated tool. We built it to do one thing and do it well: convert
 
 Trek tries to stay up-to-date with the latest stable version of PostgreSQL. We build trek with the latest stable version of pgModeler.
 
+| Trek version | PostgreSQL | pgModeler |
+|--------------|------------|-----------|
+| 0.12.x       | 18         | 1.2       |
+
 We develop and test Trek on Linux. Trek may work on other platforms via Docker.
 
 ## Installation

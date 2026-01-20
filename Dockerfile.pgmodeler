@@ -16,11 +16,18 @@ RUN go build -o dist/bin/trek .
 FROM ghcr.io/printeers/pgmodeler:latest AS release
 COPY --from=build /trek/dist/bin/trek /usr/local/bin/trek
 
+# Install PostgreSQL 18 client (must match embedded postgres version)
 RUN apt update && \
     apt upgrade -y && \
     apt install -y \
-		bash \
-        postgresql-client \
+        bash \
+        curl \
+        ca-certificates \
+    && install -d /usr/share/postgresql-common/pgdg && \
+    curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc && \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" > /etc/apt/sources.list.d/pgdg.list && \
+    apt update && \
+    apt install -y postgresql-client-18 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid 1001 nonroot && \
