@@ -38,7 +38,10 @@ func (p *postgresInstanceEmbedded) Start(port uint32) error {
 			Username("postgres").
 			Password("postgres").
 			Port(port).
-			Database("postgres"),
+			Database("postgres").
+			StartParameters(map[string]string{
+				"max_connections": "1000",
+			}),
 	)
 
 	err = p.db.Start()
