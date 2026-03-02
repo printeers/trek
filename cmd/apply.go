@@ -132,6 +132,9 @@ func NewApplyCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("failed to initialize go-migrate: %w", err)
 			}
+			defer func() {
+				_, _ = m.Close()
+			}()
 
 			if resetDatabase || !databaseExists {
 				var migrationFiles []string

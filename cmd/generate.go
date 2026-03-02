@@ -595,6 +595,9 @@ func executeMigrateSQL(migrationsDir string, migrateConn *pgx.Conn) error {
 	if err != nil {
 		return fmt.Errorf("failed to create migrate: %w", err)
 	}
+	defer func() {
+		_, _ = m.Close()
+	}()
 	err = m.Up()
 	if err != nil {
 		return fmt.Errorf("failed to up migrations: %w", err)

@@ -271,6 +271,9 @@ func checkMigrationsAndTestdata(ctx context.Context, wd, migrationsDir, dsn stri
 	if err != nil {
 		return fmt.Errorf("failed to initialize go-migrate: %w", err)
 	}
+	defer func() {
+		_, _ = m.Close()
+	}()
 
 	for index, file := range migrationFiles {
 		err = m.Steps(1)
