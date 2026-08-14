@@ -24,6 +24,19 @@ import (
 	"github.com/printeers/trek/internal"
 )
 
+// migrateLogger makes go-migrate report every migration it applies. Verbose is
+// false because that already yields one line per migration; verbose mode only
+// adds go-migrate's internal buffering and scheduling steps.
+type migrateLogger struct{}
+
+func (migrateLogger) Printf(format string, v ...any) {
+	log.Printf(format, v...)
+}
+
+func (migrateLogger) Verbose() bool {
+	return false
+}
+
 //nolint:gocognit,cyclop
 func NewApplyCommand() *cobra.Command {
 	var (
@@ -132,6 +145,7 @@ func NewApplyCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("failed to initialize go-migrate: %w", err)
 			}
+			m.Log = migrateLogger{}
 			defer func() {
 				_, _ = m.Close()
 			}()
@@ -144,7 +158,6 @@ func NewApplyCommand() *cobra.Command {
 				}
 
 				for index, file := range migrationFiles {
-					log.Printf("Applying migration %q\n", file)
 					err = m.Steps(1)
 					if errors.Is(err, migrate.ErrNoChange) {
 						log.Println("No changes!")
