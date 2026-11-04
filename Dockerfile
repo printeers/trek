@@ -1,4 +1,4 @@
-FROM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
 
 # Cache module dependencies
 COPY go.mod /trek/go.mod
@@ -10,7 +10,8 @@ RUN go mod download
 COPY ./cmd /trek/cmd
 COPY ./internal /trek/internal
 COPY ./main.go /trek
-RUN go build -o dist/bin/trek .
+ARG TARGETOS TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o dist/bin/trek .
 
 
 FROM alpine:latest AS release

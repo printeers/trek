@@ -37,7 +37,7 @@ Trek requires to have `psql`, `pg_dump` and `pgmodeler-cli` installed. Trek will
 
 ## MacOS / Windows
 
-If you're running on MacOS or Windows, then the embedded `migra` doesn't work. Either install migra manually or use `docker` to run trek under `linux/amd64` (Rosetta emulation).
+Use `docker` to run trek. The `trek` images are built for `linux/amd64` and `linux/arm64`; the `-pgmodeler` images for `linux/amd64` only, which Docker on Apple silicon runs under emulation.
 
 ## Docker
 
